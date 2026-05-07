@@ -23,6 +23,12 @@ Requires Go 1.22+.
 go install github.com/itaprac/sshuttlebox/cmd/shbx@latest
 ```
 
+Update to the latest version with the same command:
+
+```bash
+go install github.com/itaprac/sshuttlebox/cmd/shbx@latest
+```
+
 Supported targets: macOS and Linux.
 
 ## Usage
