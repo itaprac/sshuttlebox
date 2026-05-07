@@ -278,7 +278,7 @@ func (a App) runList(args []string) error {
 	}
 
 	for _, name := range names {
-		fmt.Fprintln(a.out, name)
+		fmt.Fprintf(a.out, "%-16s %s\n", name, formatListTarget(cfg.Hosts[name]))
 	}
 	return nil
 }
@@ -320,8 +320,23 @@ func (a App) runShow(args []string) error {
 }
 
 func (a App) runConnect(args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: shbx connect <name>")
+	const usage = "usage: shbx connect <name> [--dry-run|--print]"
+
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New(usage)
+	}
+
+	fs := flag.NewFlagSet("connect", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	dryRunFlag := fs.Bool("dry-run", false, "Print SSH command without running it")
+	printFlag := fs.Bool("print", false, "Print SSH command without running it")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		return errors.New(usage)
+	}
+	if fs.NArg() != 0 {
+		return errors.New(usage)
 	}
 
 	name := strings.TrimSpace(args[0])
@@ -340,6 +355,11 @@ func (a App) runConnect(args []string) error {
 	}
 
 	sshArgs := buildSSHArgs(host)
+	if *dryRunFlag || *printFlag {
+		fmt.Fprintln(a.out, shellCommandString("ssh", sshArgs))
+		return nil
+	}
+
 	cmd := exec.Command("ssh", sshArgs...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -574,7 +594,7 @@ Usage:
 
 Commands:
   add [name]       Add or update SSH host
-  list             List saved hosts
+  list             List saved hosts with SSH targets
   show <name>      Show saved host details
   connect <name>   Connect to saved host over SSH
   edit <name>      Edit saved host
@@ -599,6 +619,10 @@ Edit options:
   --user <user>                SSH username (empty clears it)
   --port <port>                SSH port (0 uses default: 22)
   --identity-file <path>       SSH private key path (empty clears it)
+
+Connect options:
+  --dry-run                    Print SSH command without connecting
+  --print                      Alias for --dry-run
 `)
 }
 
@@ -613,12 +637,49 @@ func buildSSHArgs(host config.Host) []string {
 		args = append(args, "-i", host.IdentityFile)
 	}
 
+	return append(args, formatSSHTarget(host))
+}
+
+func formatSSHTarget(host config.Host) string {
 	target := host.Host
 	if host.User != "" {
 		target = host.User + "@" + host.Host
 	}
+	return target
+}
 
-	return append(args, target)
+func formatListTarget(host config.Host) string {
+	port := host.Port
+	if port == 0 {
+		port = defaultSSHPort
+	}
+
+	return fmt.Sprintf("%s:%d", formatSSHTarget(host), port)
+}
+
+func shellCommandString(command string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, command)
+	for _, arg := range args {
+		parts = append(parts, shellQuote(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	if strings.IndexFunc(value, func(r rune) bool {
+		return !(r >= 'A' && r <= 'Z') &&
+			!(r >= 'a' && r <= 'z') &&
+			!(r >= '0' && r <= '9') &&
+			!strings.ContainsRune("@%_+=:,./-", r)
+	}) == -1 {
+		return value
+	}
+
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func prompt(reader *bufio.Reader, out io.Writer, label string) (string, error) {

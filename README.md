@@ -33,6 +33,7 @@ shbx add [name]
 shbx list
 shbx show <name>
 shbx connect <name>
+shbx connect <name> --dry-run
 shbx edit <name>
 shbx remove <name>
 ```
@@ -49,6 +50,7 @@ go run ./cmd/shbx add
 go run ./cmd/shbx add prod --host 192.0.2.10 --user deploy --port 22 --identity-file ~/.ssh/id_ed25519
 go run ./cmd/shbx list
 go run ./cmd/shbx show prod
+go run ./cmd/shbx connect prod --dry-run
 go run ./cmd/shbx connect prod
 go run ./cmd/shbx edit prod --name staging --host 192.0.2.11 --user deploy --port 2222
 go run ./cmd/shbx remove staging
