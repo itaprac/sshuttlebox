@@ -36,6 +36,7 @@ shbx connect <name>
 shbx connect <name> --dry-run
 shbx edit <name>
 shbx remove <name>
+shbx remove <name> --yes
 ```
 
 ## Development
@@ -53,5 +54,5 @@ go run ./cmd/shbx show prod
 go run ./cmd/shbx connect prod --dry-run
 go run ./cmd/shbx connect prod
 go run ./cmd/shbx edit prod --name staging --host 192.0.2.11 --user deploy --port 2222
-go run ./cmd/shbx remove staging
+go run ./cmd/shbx remove staging --yes
 ```

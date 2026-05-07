@@ -513,8 +513,23 @@ func (a App) runEdit(args []string) error {
 }
 
 func (a App) runRemove(args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: shbx remove <name>")
+	const usage = "usage: shbx remove <name> [--yes|--force]"
+
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New(usage)
+	}
+
+	fs := flag.NewFlagSet("remove", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	yesFlag := fs.Bool("yes", false, "Skip confirmation")
+	forceFlag := fs.Bool("force", false, "Skip confirmation")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		return errors.New(usage)
+	}
+	if fs.NArg() != 0 {
+		return errors.New(usage)
 	}
 
 	name := strings.TrimSpace(args[0])
@@ -534,6 +549,22 @@ func (a App) runRemove(args []string) error {
 
 	if _, ok := cfg.Hosts[name]; !ok {
 		return fmt.Errorf("host %q not found", name)
+	}
+
+	if !*yesFlag && !*forceFlag {
+		if !isTerminalInput(a.in) {
+			return fmt.Errorf("confirmation required; pass --yes to remove host %q", name)
+		}
+
+		reader := bufio.NewReader(a.in)
+		remove, err := confirm(reader, a.out, fmt.Sprintf("Remove host %q?", name))
+		if err != nil {
+			return err
+		}
+		if !remove {
+			fmt.Fprintln(a.out, "Cancelled.")
+			return nil
+		}
 	}
 
 	delete(cfg.Hosts, name)
@@ -627,6 +658,10 @@ Edit options:
 Connect options:
   --dry-run                    Print SSH command without connecting
   --print                      Alias for --dry-run
+
+Remove options:
+  --yes                        Remove without confirmation
+  --force                      Alias for --yes
 `)
 }
 
