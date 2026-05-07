@@ -5,15 +5,14 @@
 `sshuttlebox` is a small CLI for saving SSH hosts and connecting to them with the `shbx` command.
 
 It stores hosts locally in `~/.config/sshuttlebox/config.json` and uses the system `ssh` command for connections.
-Password-based automatic login is handled by `shbx` through a pseudo-terminal when a saved host has a password.
-Interactive password prompts hide what you type.
+Saved passwords can be used for automatic login.
 
 ## Features
 
 - Add SSH hosts interactively or with flags
 - List saved hosts with `NAME`, `TARGET`, and `KEY`
 - Preview SSH commands with `connect --dry-run`
-- Store an optional SSH password and connect without external password helpers
+- Save SSH passwords and connect without external password helpers
 - Connect, edit, rename, and remove saved hosts
 - Confirmation prompts for overwrites and removals
 - Warnings for missing SSH identity files

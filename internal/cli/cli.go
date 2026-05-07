@@ -180,19 +180,19 @@ func (a App) runAdd(args []string) error {
 			return err
 		}
 		if user == "" {
-			user, err = prompt(reader, a.out, "User (optional)")
+			user, err = prompt(reader, a.out, "User")
 			if err != nil {
 				return err
 			}
 		}
 		if password == "" {
-			password, err = promptPassword(reader, a.in, a.out, "Password (optional)")
+			password, err = promptPassword(reader, a.in, a.out, "Password")
 			if err != nil {
 				return err
 			}
 		}
 		if port == 0 {
-			portText, err := prompt(reader, a.out, fmt.Sprintf("Port (optional, default %d)", defaultSSHPort))
+			portText, err := prompt(reader, a.out, fmt.Sprintf("Port [default %d]", defaultSSHPort))
 			if err != nil {
 				return err
 			}
@@ -204,7 +204,7 @@ func (a App) runAdd(args []string) error {
 			}
 		}
 		if identityFile == "" {
-			identityFile, err = prompt(reader, a.out, "Identity file (optional)")
+			identityFile, err = prompt(reader, a.out, "Identity file")
 			if err != nil {
 				return err
 			}
@@ -217,7 +217,7 @@ func (a App) runAdd(args []string) error {
 		if err != nil {
 			return err
 		}
-		user, err = promptWithDefault(reader, a.out, "User (optional)", user)
+		user, err = promptWithDefault(reader, a.out, "User", user)
 		if err != nil {
 			return err
 		}
@@ -230,7 +230,7 @@ func (a App) runAdd(args []string) error {
 		if port != 0 {
 			currentPort = strconv.Itoa(port)
 		}
-		portText, err := promptWithDefault(reader, a.out, fmt.Sprintf("Port (optional, default %d)", defaultSSHPort), currentPort)
+		portText, err := promptWithDefault(reader, a.out, fmt.Sprintf("Port [default %d]", defaultSSHPort), currentPort)
 		if err != nil {
 			return err
 		}
@@ -243,7 +243,7 @@ func (a App) runAdd(args []string) error {
 			}
 		}
 
-		identityFile, err = promptWithDefault(reader, a.out, "Identity file (optional)", identityFile)
+		identityFile, err = promptWithDefault(reader, a.out, "Identity file", identityFile)
 		if err != nil {
 			return err
 		}
@@ -337,7 +337,7 @@ func (a App) runShow(args []string) error {
 	if host.Port != 0 {
 		fmt.Fprintf(a.out, "Port: %d\n", host.Port)
 	} else {
-		fmt.Fprintf(a.out, "Port: %d (default)\n", defaultSSHPort)
+		fmt.Fprintf(a.out, "Port: %d default\n", defaultSSHPort)
 	}
 	if host.IdentityFile != "" {
 		fmt.Fprintf(a.out, "Identity file: %s\n", host.IdentityFile)
@@ -461,7 +461,7 @@ func (a App) runEdit(args []string) error {
 		}
 		host.Host = hostText
 
-		userText, err := promptWithDefault(reader, a.out, "User (optional)", host.User)
+		userText, err := promptWithDefault(reader, a.out, "User", host.User)
 		if err != nil {
 			return err
 		}
@@ -477,7 +477,7 @@ func (a App) runEdit(args []string) error {
 		if host.Port != 0 {
 			currentPort = strconv.Itoa(host.Port)
 		}
-		portText, err := promptWithDefault(reader, a.out, fmt.Sprintf("Port (optional, default %d)", defaultSSHPort), currentPort)
+		portText, err := promptWithDefault(reader, a.out, fmt.Sprintf("Port [default %d]", defaultSSHPort), currentPort)
 		if err != nil {
 			return err
 		}
@@ -491,7 +491,7 @@ func (a App) runEdit(args []string) error {
 			host.Port = port
 		}
 
-		identityFileText, err := promptWithDefault(reader, a.out, "Identity file (optional)", host.IdentityFile)
+		identityFileText, err := promptWithDefault(reader, a.out, "Identity file", host.IdentityFile)
 		if err != nil {
 			return err
 		}
@@ -651,7 +651,7 @@ func (a App) runConfig(args []string) error {
 		if exists {
 			status = "present"
 		}
-		fmt.Fprintf(a.out, "Config: %s (%s)\n", path, status)
+		fmt.Fprintf(a.out, "Config: %s %s\n", path, status)
 		return nil
 	default:
 		return fmt.Errorf("unknown config command %q; available: init, path, status", strings.Join(args, " "))
@@ -683,16 +683,16 @@ Add options:
   --host <host>                SSH hostname or IP
   --user <user>                SSH username
   --password <password>        SSH password for automatic login
-  --port <port>                SSH port (default: 22)
+  --port <port>                SSH port, default 22
   --identity-file <path>       SSH private key path
 
 Edit options:
   --name <name>                Rename saved host
   --host <host>                SSH hostname or IP
-  --user <user>                SSH username (empty clears it)
-  --password <password>        SSH password for automatic login (empty clears it)
-  --port <port>                SSH port (0 uses default: 22)
-  --identity-file <path>       SSH private key path (empty clears it)
+  --user <user>                SSH username, empty clears
+  --password <password>        SSH password, empty clears
+  --port <port>                SSH port, 0 uses default 22
+  --identity-file <path>       SSH private key path, empty clears
 
 Connect options:
   --dry-run                    Print SSH command without connecting
@@ -961,9 +961,9 @@ func promptPassword(reader *bufio.Reader, in io.Reader, out io.Writer, label str
 }
 
 func promptPasswordEdit(reader *bufio.Reader, in io.Reader, out io.Writer, current string) (string, error) {
-	label := "Password (Enter = keep, - = clear)"
+	label := "Password [Enter keep, - clear]"
 	if current == "" {
-		label = "Password (optional, Enter = skip)"
+		label = "Password [Enter skip]"
 	}
 	text, err := promptPassword(reader, in, out, label)
 	if err != nil {

@@ -20,7 +20,7 @@ func TestConfigCommands(t *testing.T) {
 	if err := app.Run([]string{"config", "status"}); err != nil {
 		t.Fatalf("status before init: %v", err)
 	}
-	if !strings.Contains(out.String(), "(missing)") {
+	if !strings.Contains(out.String(), "missing") {
 		t.Fatalf("expected missing status, got %q", out.String())
 	}
 
@@ -138,7 +138,7 @@ func TestShowDisplaysDefaultPort(t *testing.T) {
 		t.Fatalf("show: %v", err)
 	}
 
-	if !strings.Contains(out.String(), "Port: 22 (default)") {
+	if !strings.Contains(out.String(), "Port: 22 default") {
 		t.Fatalf("expected default port, got %q", out.String())
 	}
 }
