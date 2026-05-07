@@ -52,6 +52,8 @@ func (a App) Run(args []string) error {
 		return a.runShow(args[1:])
 	case "connect":
 		return a.runConnect(args[1:])
+	case "edit":
+		return a.runEdit(args[1:])
 	case "remove":
 		return a.runRemove(args[1:])
 	default:
@@ -261,6 +263,146 @@ func (a App) runConnect(args []string) error {
 	return cmd.Run()
 }
 
+func (a App) runEdit(args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--port port] [--identity-file path]")
+	}
+
+	fs := flag.NewFlagSet("edit", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	newNameFlag := fs.String("name", "", "New saved host name")
+	hostFlag := fs.String("host", "", "SSH host")
+	userFlag := fs.String("user", "", "SSH user")
+	portFlag := fs.Int("port", 0, "SSH port")
+	identityFileFlag := fs.String("identity-file", "", "SSH identity file")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--port port] [--identity-file path]")
+	}
+
+	if fs.NArg() != 0 {
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--port port] [--identity-file path]")
+	}
+
+	name := strings.TrimSpace(args[0])
+	if name == "" {
+		return errors.New("host name cannot be empty")
+	}
+
+	path, err := config.Path()
+	if err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	host, ok := cfg.Hosts[name]
+	if !ok {
+		return fmt.Errorf("host %q not found", name)
+	}
+	newName := name
+
+	if fs.NFlag() == 0 {
+		if !isTerminalInput(a.in) {
+			return errors.New("missing edit options; pass at least one of --name, --host, --user, --port, --identity-file")
+		}
+
+		reader := bufio.NewReader(a.in)
+
+		nameText, err := promptWithDefault(reader, a.out, "Name", name)
+		if err != nil {
+			return err
+		}
+		newName = strings.TrimSpace(nameText)
+
+		hostText, err := promptWithDefault(reader, a.out, "Host", host.Host)
+		if err != nil {
+			return err
+		}
+		host.Host = hostText
+
+		userText, err := promptWithDefault(reader, a.out, "User (optional)", host.User)
+		if err != nil {
+			return err
+		}
+		host.User = userText
+
+		currentPort := ""
+		if host.Port != 0 {
+			currentPort = strconv.Itoa(host.Port)
+		}
+		portText, err := promptWithDefault(reader, a.out, fmt.Sprintf("Port (optional, default %d)", defaultSSHPort), currentPort)
+		if err != nil {
+			return err
+		}
+		if portText == "" {
+			host.Port = 0
+		} else {
+			port, err := strconv.Atoi(portText)
+			if err != nil {
+				return fmt.Errorf("invalid port %q", portText)
+			}
+			host.Port = port
+		}
+
+		identityFileText, err := promptWithDefault(reader, a.out, "Identity file (optional)", host.IdentityFile)
+		if err != nil {
+			return err
+		}
+		host.IdentityFile = identityFileText
+	} else {
+		if flagWasSet(fs, "name") {
+			newName = strings.TrimSpace(*newNameFlag)
+		}
+		if flagWasSet(fs, "host") {
+			host.Host = strings.TrimSpace(*hostFlag)
+		}
+		if flagWasSet(fs, "user") {
+			host.User = strings.TrimSpace(*userFlag)
+		}
+		if flagWasSet(fs, "port") {
+			host.Port = *portFlag
+		}
+		if flagWasSet(fs, "identity-file") {
+			host.IdentityFile = strings.TrimSpace(*identityFileFlag)
+		}
+	}
+
+	if newName == "" {
+		return errors.New("host name cannot be empty")
+	}
+	if newName != name {
+		if _, exists := cfg.Hosts[newName]; exists {
+			return fmt.Errorf("host %q already exists", newName)
+		}
+	}
+	if host.Host == "" {
+		return errors.New("SSH host cannot be empty")
+	}
+	if host.Port < 0 || host.Port > 65535 {
+		return fmt.Errorf("invalid port %d", host.Port)
+	}
+
+	if newName != name {
+		delete(cfg.Hosts, name)
+	}
+	cfg.Hosts[newName] = host
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+
+	if newName != name {
+		fmt.Fprintf(a.out, "Updated host %q as %q\n", name, newName)
+	} else {
+		fmt.Fprintf(a.out, "Updated host %q\n", name)
+	}
+	return nil
+}
+
 func (a App) runRemove(args []string) error {
 	if len(args) != 1 {
 		return errors.New("usage: shbx remove <name>")
@@ -350,6 +492,7 @@ Commands:
   list             List saved hosts
   show <name>      Show saved host details
   connect <name>   Connect to saved host over SSH
+  edit <name>      Edit saved host
   remove <name>    Remove saved host
   config init      Create config file if it does not exist
   config path      Print config file path
@@ -363,8 +506,12 @@ Add options:
   --port <port>                SSH port (default: 22)
   --identity-file <path>       SSH private key path
 
-Next planned commands:
-  edit <name>      Edit saved host
+Edit options:
+  --name <name>                Rename saved host
+  --host <host>                SSH hostname or IP
+  --user <user>                SSH username (empty clears it)
+  --port <port>                SSH port (0 uses default: 22)
+  --identity-file <path>       SSH private key path (empty clears it)
 `)
 }
 
@@ -396,6 +543,35 @@ func prompt(reader *bufio.Reader, out io.Writer, label string) (string, error) {
 	}
 
 	return strings.TrimSpace(text), nil
+}
+
+func promptWithDefault(reader *bufio.Reader, out io.Writer, label, current string) (string, error) {
+	if current != "" {
+		fmt.Fprintf(out, "%s [%s]: ", label, current)
+	} else {
+		fmt.Fprintf(out, "%s: ", label)
+	}
+
+	text, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return current, nil
+	}
+	return text, nil
+}
+
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	wasSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			wasSet = true
+		}
+	})
+	return wasSet
 }
 
 func isTerminalInput(in io.Reader) bool {
