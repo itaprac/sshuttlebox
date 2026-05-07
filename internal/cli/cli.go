@@ -236,6 +236,7 @@ func (a App) runAdd(args []string) error {
 	if port < 0 || port > 65535 {
 		return fmt.Errorf("invalid port %d", port)
 	}
+	warnMissingIdentityFile(identityFile)
 
 	cfg.Hosts[name] = config.Host{
 		Host:         host,
@@ -277,8 +278,10 @@ func (a App) runList(args []string) error {
 		return nil
 	}
 
+	fmt.Fprintf(a.out, "%-16s %-28s %s\n", "NAME", "TARGET", "KEY")
 	for _, name := range names {
-		fmt.Fprintf(a.out, "%-16s %s\n", name, formatListTarget(cfg.Hosts[name]))
+		host := cfg.Hosts[name]
+		fmt.Fprintf(a.out, "%-16s %-28s %s\n", name, formatListTarget(host), formatListKey(host))
 	}
 	return nil
 }
@@ -491,6 +494,7 @@ func (a App) runEdit(args []string) error {
 	if host.Port < 0 || host.Port > 65535 {
 		return fmt.Errorf("invalid port %d", host.Port)
 	}
+	warnMissingIdentityFile(host.IdentityFile)
 
 	if newName != name {
 		delete(cfg.Hosts, name)
@@ -657,6 +661,13 @@ func formatListTarget(host config.Host) string {
 	return fmt.Sprintf("%s:%d", formatSSHTarget(host), port)
 }
 
+func formatListKey(host config.Host) string {
+	if host.IdentityFile == "" {
+		return "-"
+	}
+	return host.IdentityFile
+}
+
 func shellCommandString(command string, args []string) string {
 	parts := make([]string, 0, len(args)+1)
 	parts = append(parts, command)
@@ -680,6 +691,42 @@ func shellQuote(value string) string {
 	}
 
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func warnMissingIdentityFile(path string) {
+	if path == "" {
+		return
+	}
+
+	expandedPath := expandHomePath(path)
+	info, err := os.Stat(expandedPath)
+	if err == nil {
+		if info.IsDir() {
+			fmt.Fprintf(os.Stderr, "Warning: identity file is a directory: %s\n", path)
+		}
+		return
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "Warning: identity file does not exist: %s\n", path)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "Warning: cannot check identity file %s: %v\n", path, err)
+}
+
+func expandHomePath(path string) string {
+	if path == "~" {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			return homeDir
+		}
+	}
+	if strings.HasPrefix(path, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			return homeDir + path[1:]
+		}
+	}
+	return path
 }
 
 func prompt(reader *bufio.Reader, out io.Writer, label string) (string, error) {
