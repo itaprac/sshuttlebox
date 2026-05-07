@@ -83,6 +83,7 @@ func TestSaveAndLoadHosts(t *testing.T) {
 	cfg.Hosts["prod"] = Host{
 		Host:         "192.0.2.10",
 		User:         "deploy",
+		Password:     "secret",
 		Port:         2222,
 		IdentityFile: "~/.ssh/id_ed25519",
 	}

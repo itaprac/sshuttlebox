@@ -46,7 +46,7 @@ func TestAddWithoutNamePromptsAndListShowsTable(t *testing.T) {
 
 	var out bytes.Buffer
 	app := App{
-		in:  strings.NewReader("prod\n192.0.2.10\ndeploy\n2222\n~/.ssh/id_ed25519\n"),
+		in:  strings.NewReader("prod\n192.0.2.10\ndeploy\n\n2222\n~/.ssh/id_ed25519\n"),
 		out: &out,
 	}
 
@@ -105,6 +105,29 @@ func TestAddExistingHostAsksBeforeUpdate(t *testing.T) {
 	assertHost(t, "prod", config.Host{Host: "new.example", User: "deploy", Port: 22})
 }
 
+func TestAddStoresPasswordAndShowMasksIt(t *testing.T) {
+	withTempHome(t)
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"add", "prod", "--host", "192.0.2.10", "--user", "deploy", "--password", "secret"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	assertHost(t, "prod", config.Host{Host: "192.0.2.10", User: "deploy", Password: "secret"})
+
+	out.Reset()
+	if err := app.Run([]string{"show", "prod"}); err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "Password: set") {
+		t.Fatalf("expected masked password marker, got %q", got)
+	}
+	if strings.Contains(got, "secret") {
+		t.Fatalf("show leaked password in %q", got)
+	}
+}
+
 func TestShowDisplaysDefaultPort(t *testing.T) {
 	withTempHome(t)
 	addHost(t, "dev", config.Host{Host: "example.com", User: "root"})
@@ -145,6 +168,51 @@ func TestConnectDryRunAndPrint(t *testing.T) {
 	}
 	if out.String() != want {
 		t.Fatalf("print output = %q, want %q", out.String(), want)
+	}
+}
+
+func TestConnectDryRunWithPasswordUsesSSHPasswordWrapper(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{
+		Host:     "192.0.2.10",
+		User:     "deploy",
+		Password: "secret",
+		Port:     2222,
+	})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"connect", "prod", "--dry-run"}); err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+	want := "ssh -p 2222 deploy@192.0.2.10 # password: set\n"
+	if out.String() != want {
+		t.Fatalf("dry-run output = %q, want %q", out.String(), want)
+	}
+	if strings.Contains(out.String(), "secret") {
+		t.Fatalf("dry-run leaked password in %q", out.String())
+	}
+}
+
+func TestLooksLikePasswordPrompt(t *testing.T) {
+	for _, prompt := range []string{
+		"deploy@192.0.2.10's password:",
+		"Password:",
+		"\r\nuser password:",
+	} {
+		if !looksLikePasswordPrompt(prompt) {
+			t.Fatalf("expected password prompt for %q", prompt)
+		}
+	}
+
+	for _, prompt := range []string{
+		"Permission denied, please try again.",
+		"Password authentication failed",
+		"password accepted",
+	} {
+		if looksLikePasswordPrompt(prompt) {
+			t.Fatalf("unexpected password prompt for %q", prompt)
+		}
 	}
 }
 

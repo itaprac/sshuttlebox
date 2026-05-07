@@ -21,6 +21,7 @@ type Config struct {
 type Host struct {
 	Host         string `json:"host"`
 	User         string `json:"user,omitempty"`
+	Password     string `json:"password,omitempty"`
 	Port         int    `json:"port,omitempty"`
 	IdentityFile string `json:"identityFile,omitempty"`
 }

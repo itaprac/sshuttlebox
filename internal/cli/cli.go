@@ -8,11 +8,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
+	"github.com/creack/pty"
 	"github.com/itaprac/sshuttlebox/internal/config"
+	"golang.org/x/term"
 )
 
 const Version = "0.1.0-dev"
@@ -62,7 +66,7 @@ func (a App) Run(args []string) error {
 }
 
 func (a App) runAdd(args []string) error {
-	const usage = "usage: shbx add [name] [--host host] [--user user] [--port port] [--identity-file path]"
+	const usage = "usage: shbx add [name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]"
 
 	name := ""
 	flagArgs := args
@@ -76,6 +80,7 @@ func (a App) runAdd(args []string) error {
 
 	hostFlag := fs.String("host", "", "SSH host")
 	userFlag := fs.String("user", "", "SSH user")
+	passwordFlag := fs.String("password", "", "SSH password")
 	portFlag := fs.Int("port", 0, "SSH port")
 	identityFileFlag := fs.String("identity-file", "", "SSH identity file")
 
@@ -141,6 +146,7 @@ func (a App) runAdd(args []string) error {
 
 	host := strings.TrimSpace(*hostFlag)
 	user := strings.TrimSpace(*userFlag)
+	password := *passwordFlag
 	identityFile := strings.TrimSpace(*identityFileFlag)
 	port := *portFlag
 
@@ -150,6 +156,9 @@ func (a App) runAdd(args []string) error {
 		}
 		if !flagWasSet(fs, "user") {
 			user = existingHost.User
+		}
+		if !flagWasSet(fs, "password") {
+			password = existingHost.Password
 		}
 		if !flagWasSet(fs, "port") {
 			port = existingHost.Port
@@ -172,6 +181,12 @@ func (a App) runAdd(args []string) error {
 		}
 		if user == "" {
 			user, err = prompt(reader, a.out, "User (optional)")
+			if err != nil {
+				return err
+			}
+		}
+		if password == "" {
+			password, err = promptPassword(reader, a.in, a.out, "Password (optional)")
 			if err != nil {
 				return err
 			}
@@ -203,6 +218,10 @@ func (a App) runAdd(args []string) error {
 			return err
 		}
 		user, err = promptWithDefault(reader, a.out, "User (optional)", user)
+		if err != nil {
+			return err
+		}
+		password, err = promptPasswordEdit(reader, a.in, a.out, password)
 		if err != nil {
 			return err
 		}
@@ -241,6 +260,7 @@ func (a App) runAdd(args []string) error {
 	cfg.Hosts[name] = config.Host{
 		Host:         host,
 		User:         user,
+		Password:     password,
 		Port:         port,
 		IdentityFile: identityFile,
 	}
@@ -311,6 +331,9 @@ func (a App) runShow(args []string) error {
 	if host.User != "" {
 		fmt.Fprintf(a.out, "User: %s\n", host.User)
 	}
+	if host.Password != "" {
+		fmt.Fprintln(a.out, "Password: set")
+	}
 	if host.Port != 0 {
 		fmt.Fprintf(a.out, "Port: %d\n", host.Port)
 	} else {
@@ -359,8 +382,12 @@ func (a App) runConnect(args []string) error {
 
 	sshArgs := buildSSHArgs(host)
 	if *dryRunFlag || *printFlag {
-		fmt.Fprintln(a.out, shellCommandString("ssh", sshArgs))
+		fmt.Fprintln(a.out, connectCommandString(host, sshArgs))
 		return nil
+	}
+
+	if host.Password != "" {
+		return runSSHWithPassword(host.Password, sshArgs)
 	}
 
 	cmd := exec.Command("ssh", sshArgs...)
@@ -373,7 +400,7 @@ func (a App) runConnect(args []string) error {
 
 func (a App) runEdit(args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--port port] [--identity-file path]")
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]")
 	}
 
 	fs := flag.NewFlagSet("edit", flag.ContinueOnError)
@@ -382,15 +409,16 @@ func (a App) runEdit(args []string) error {
 	newNameFlag := fs.String("name", "", "New saved host name")
 	hostFlag := fs.String("host", "", "SSH host")
 	userFlag := fs.String("user", "", "SSH user")
+	passwordFlag := fs.String("password", "", "SSH password")
 	portFlag := fs.Int("port", 0, "SSH port")
 	identityFileFlag := fs.String("identity-file", "", "SSH identity file")
 
 	if err := fs.Parse(args[1:]); err != nil {
-		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--port port] [--identity-file path]")
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]")
 	}
 
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--port port] [--identity-file path]")
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]")
 	}
 
 	name := strings.TrimSpace(args[0])
@@ -416,7 +444,7 @@ func (a App) runEdit(args []string) error {
 
 	if fs.NFlag() == 0 {
 		if !isTerminalInput(a.in) {
-			return errors.New("missing edit options; pass at least one of --name, --host, --user, --port, --identity-file")
+			return errors.New("missing edit options; pass at least one of --name, --host, --user, --password, --port, --identity-file")
 		}
 
 		reader := bufio.NewReader(a.in)
@@ -438,6 +466,12 @@ func (a App) runEdit(args []string) error {
 			return err
 		}
 		host.User = userText
+
+		passwordText, err := promptPasswordEdit(reader, a.in, a.out, host.Password)
+		if err != nil {
+			return err
+		}
+		host.Password = passwordText
 
 		currentPort := ""
 		if host.Port != 0 {
@@ -471,6 +505,9 @@ func (a App) runEdit(args []string) error {
 		}
 		if flagWasSet(fs, "user") {
 			host.User = strings.TrimSpace(*userFlag)
+		}
+		if flagWasSet(fs, "password") {
+			host.Password = *passwordFlag
 		}
 		if flagWasSet(fs, "port") {
 			host.Port = *portFlag
@@ -645,6 +682,7 @@ Add options:
   shbx add <name>              Add host with a saved name
   --host <host>                SSH hostname or IP
   --user <user>                SSH username
+  --password <password>        SSH password for automatic login
   --port <port>                SSH port (default: 22)
   --identity-file <path>       SSH private key path
 
@@ -652,6 +690,7 @@ Edit options:
   --name <name>                Rename saved host
   --host <host>                SSH hostname or IP
   --user <user>                SSH username (empty clears it)
+  --password <password>        SSH password for automatic login (empty clears it)
   --port <port>                SSH port (0 uses default: 22)
   --identity-file <path>       SSH private key path (empty clears it)
 
@@ -710,6 +749,119 @@ func shellCommandString(command string, args []string) string {
 		parts = append(parts, shellQuote(arg))
 	}
 	return strings.Join(parts, " ")
+}
+
+func connectCommandString(host config.Host, sshArgs []string) string {
+	if host.Password == "" {
+		return shellCommandString("ssh", sshArgs)
+	}
+	return shellCommandString("ssh", sshArgs) + " # password: set"
+}
+
+func runSSHWithPassword(password string, sshArgs []string) error {
+	stdin, ok := terminalFile(os.Stdin)
+	if !ok {
+		return errors.New("password auto-login requires an interactive terminal")
+	}
+
+	cmd := exec.Command("ssh", sshArgs...)
+	ptmx, err := startSSHPTY(cmd, stdin)
+	if err != nil {
+		return err
+	}
+	defer ptmx.Close()
+
+	resizeSignals := make(chan os.Signal, 1)
+	signal.Notify(resizeSignals, syscall.SIGWINCH)
+	defer func() {
+		signal.Stop(resizeSignals)
+		close(resizeSignals)
+	}()
+	go func() {
+		for range resizeSignals {
+			_ = pty.InheritSize(stdin, ptmx)
+		}
+	}()
+	resizeSignals <- syscall.SIGWINCH
+
+	oldState, err := term.MakeRaw(int(stdin.Fd()))
+	if err != nil {
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("set terminal raw mode: %w", err)
+	}
+	defer term.Restore(int(stdin.Fd()), oldState)
+
+	go func() {
+		_, _ = io.Copy(ptmx, stdin)
+	}()
+
+	outputDone := make(chan error, 1)
+	go func() {
+		outputDone <- copySSHOutputAndInjectPassword(os.Stdout, ptmx, password)
+	}()
+
+	waitErr := cmd.Wait()
+	_ = ptmx.Close()
+
+	outputErr := <-outputDone
+	if waitErr != nil {
+		return waitErr
+	}
+	if outputErr != nil && !errors.Is(outputErr, os.ErrClosed) {
+		return outputErr
+	}
+	return nil
+}
+
+func startSSHPTY(cmd *exec.Cmd, stdin *os.File) (*os.File, error) {
+	size, err := pty.GetsizeFull(stdin)
+	if err == nil {
+		return pty.StartWithSize(cmd, size)
+	}
+	return pty.Start(cmd)
+}
+
+func copySSHOutputAndInjectPassword(out io.Writer, ptmx *os.File, password string) error {
+	buf := make([]byte, 4096)
+	window := ""
+	passwordSent := false
+
+	for {
+		n, err := ptmx.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			if _, writeErr := out.Write(chunk); writeErr != nil {
+				return writeErr
+			}
+
+			window += string(chunk)
+			if len(window) > 512 {
+				window = window[len(window)-512:]
+			}
+
+			if !passwordSent && looksLikePasswordPrompt(window) {
+				if _, writeErr := ptmx.Write([]byte(password + "\n")); writeErr != nil {
+					return writeErr
+				}
+				passwordSent = true
+				window = ""
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, os.ErrClosed) || errors.Is(err, syscall.EIO) {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+func looksLikePasswordPrompt(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if !strings.HasSuffix(normalized, "password:") {
+		return false
+	}
+	return strings.Contains(normalized, "password:")
 }
 
 func shellQuote(value string) string {
@@ -794,6 +946,38 @@ func promptWithDefault(reader *bufio.Reader, out io.Writer, label, current strin
 	return text, nil
 }
 
+func promptPassword(reader *bufio.Reader, in io.Reader, out io.Writer, label string) (string, error) {
+	if file, ok := terminalFile(in); ok {
+		fmt.Fprintf(out, "%s: ", label)
+		password, err := term.ReadPassword(int(file.Fd()))
+		fmt.Fprintln(out)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(password)), nil
+	}
+
+	return prompt(reader, out, label)
+}
+
+func promptPasswordEdit(reader *bufio.Reader, in io.Reader, out io.Writer, current string) (string, error) {
+	label := "Password (Enter = keep, - = clear)"
+	if current == "" {
+		label = "Password (optional, Enter = skip)"
+	}
+	text, err := promptPassword(reader, in, out, label)
+	if err != nil {
+		return "", err
+	}
+	if current != "" && text == "" {
+		return current, nil
+	}
+	if text == "-" {
+		return "", nil
+	}
+	return text, nil
+}
+
 func confirm(reader *bufio.Reader, out io.Writer, label string) (bool, error) {
 	fmt.Fprintf(out, "%s [y/N]: ", label)
 
@@ -821,15 +1005,24 @@ func flagWasSet(fs *flag.FlagSet, name string) bool {
 }
 
 func isTerminalInput(in io.Reader) bool {
+	_, ok := terminalFile(in)
+	if ok {
+		return true
+	}
+	_, isFile := in.(*os.File)
+	return !isFile
+}
+
+func terminalFile(in io.Reader) (*os.File, bool) {
 	file, ok := in.(*os.File)
 	if !ok {
-		return true
+		return nil, false
 	}
 
 	info, err := file.Stat()
 	if err != nil {
-		return false
+		return nil, false
 	}
 
-	return info.Mode()&os.ModeCharDevice != 0
+	return file, info.Mode()&os.ModeCharDevice != 0
 }
