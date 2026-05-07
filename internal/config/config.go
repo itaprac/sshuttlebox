@@ -33,12 +33,12 @@ func Default() Config {
 }
 
 func Path() (string, error) {
-	configDir, err := os.UserConfigDir()
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve user config dir: %w", err)
+		return "", fmt.Errorf("resolve user home dir: %w", err)
 	}
 
-	return filepath.Join(configDir, AppDirName, ConfigFileName), nil
+	return filepath.Join(homeDir, ".config", AppDirName, ConfigFileName), nil
 }
 
 func Exists() (bool, error) {

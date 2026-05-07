@@ -19,16 +19,10 @@ Projekt jest na bardzo wczesnym etapie. Aktualnie mamy fundament CLI i konfigura
 - `shbx connect <name>`
 - `shbx remove <name>`
 
-Konfiguracja będzie trzymana w:
+Konfiguracja jest trzymana w:
 
 ```text
 ~/.config/sshuttlebox/config.json
-```
-
-na macOS zwykle:
-
-```text
-~/Library/Application Support/sshuttlebox/config.json
 ```
 
 ## Docelowy MVP
