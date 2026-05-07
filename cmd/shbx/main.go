@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"sshuttlebox/internal/cli"
+	"github.com/itaprac/sshuttlebox/internal/cli"
 )
 
 func main() {

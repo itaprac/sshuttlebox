@@ -1,0 +1,20 @@
+# Binaries and build output
+/shbx
+/bin/
+/dist/
+/build/
+
+# Go test/build artifacts
+*.test
+*.out
+coverage.txt
+coverage.out
+
+# Local/editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Local environment files
+.env
+.env.*

@@ -1,58 +1,56 @@
 # sshuttlebox / shbx
 
-Terminalowy helper do zapisywania maszyn SSH, szybkiego łączenia i docelowo tuneli oraz kluczy SSH.
+[![CI](https://github.com/itaprac/sshuttlebox/actions/workflows/ci.yml/badge.svg)](https://github.com/itaprac/sshuttlebox/actions/workflows/ci.yml)
 
-## Status
+`sshuttlebox` is a small CLI for saving SSH hosts and connecting to them with the `shbx` command.
 
-Projekt jest na bardzo wczesnym etapie. Aktualnie mamy fundament CLI i konfiguracji lokalnej.
+It stores hosts locally in `~/.config/sshuttlebox/config.json` and uses the system `ssh` command for connections.
 
-## Pierwszy zakres
+## Features
 
-- `shbx help`
-- `shbx version`
-- `shbx config init`
-- `shbx config path`
-- `shbx config status`
-- `shbx add [name]`
-- `shbx list`
-- `shbx show <name>`
-- `shbx connect <name>`
-- `shbx edit <name>`
-- `shbx remove <name>`
+- Add SSH hosts interactively or with flags
+- List saved hosts with `NAME`, `TARGET`, and `KEY`
+- Preview SSH commands with `connect --dry-run`
+- Connect, edit, rename, and remove saved hosts
+- Confirmation prompts for overwrites and removals
+- Warnings for missing SSH identity files
 
-Konfiguracja jest trzymana w:
+## Install
 
-```text
-~/.config/sshuttlebox/config.json
-```
-
-## Docelowy MVP
+Requires Go 1.22+.
 
 ```bash
-shbx add [name]
+go install github.com/itaprac/sshuttlebox/cmd/shbx@latest
+```
+
+Supported targets: macOS and Linux.
+
+## Usage
+
+```bash
+shbx config init
+shbx add
+shbx add prod --host 192.0.2.10 --user deploy --port 22 --identity-file ~/.ssh/id_ed25519
 shbx list
-shbx show <name>
-shbx connect <name>
-shbx connect <name> --dry-run
-shbx edit <name>
-shbx remove <name>
-shbx remove <name> --yes
+shbx show prod
+shbx connect prod --dry-run
+shbx connect prod
+shbx edit prod --name staging --host 192.0.2.11 --user deploy --port 2222
+shbx remove staging
+shbx remove staging --yes
+```
+
+Example list output:
+
+```text
+NAME             TARGET                       KEY
+prod             deploy@192.0.2.10:22         ~/.ssh/id_ed25519
 ```
 
 ## Development
 
-Wymagany Go 1.22+.
-
 ```bash
+go test ./...
 go run ./cmd/shbx help
-go run ./cmd/shbx config init
-go run ./cmd/shbx config status
-go run ./cmd/shbx add
-go run ./cmd/shbx add prod --host 192.0.2.10 --user deploy --port 22 --identity-file ~/.ssh/id_ed25519
-go run ./cmd/shbx list
-go run ./cmd/shbx show prod
-go run ./cmd/shbx connect prod --dry-run
-go run ./cmd/shbx connect prod
-go run ./cmd/shbx edit prod --name staging --host 192.0.2.11 --user deploy --port 2222
-go run ./cmd/shbx remove staging --yes
+go build -o shbx ./cmd/shbx
 ```

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"sshuttlebox/internal/config"
+	"github.com/itaprac/sshuttlebox/internal/config"
 )
 
 func TestConfigCommands(t *testing.T) {
