@@ -13,7 +13,7 @@ Projekt jest na bardzo wczesnym etapie. Aktualnie mamy fundament CLI i konfigura
 - `shbx config init`
 - `shbx config path`
 - `shbx config status`
-- `shbx add <name>`
+- `shbx add [name]`
 - `shbx list`
 - `shbx show <name>`
 - `shbx connect <name>`
@@ -29,7 +29,7 @@ Konfiguracja jest trzymana w:
 ## Docelowy MVP
 
 ```bash
-shbx add <name>
+shbx add [name]
 shbx list
 shbx show <name>
 shbx connect <name>
@@ -45,10 +45,11 @@ Wymagany Go 1.22+.
 go run ./cmd/shbx help
 go run ./cmd/shbx config init
 go run ./cmd/shbx config status
+go run ./cmd/shbx add
 go run ./cmd/shbx add prod --host 192.0.2.10 --user deploy --port 22 --identity-file ~/.ssh/id_ed25519
 go run ./cmd/shbx list
 go run ./cmd/shbx show prod
 go run ./cmd/shbx connect prod
 go run ./cmd/shbx edit prod --name staging --host 192.0.2.11 --user deploy --port 2222
-go run ./cmd/shbx remove prod
+go run ./cmd/shbx remove staging
 ```

@@ -62,8 +62,13 @@ func (a App) Run(args []string) error {
 }
 
 func (a App) runAdd(args []string) error {
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("usage: shbx add <name> [--host host] [--user user] [--port port] [--identity-file path]")
+	const usage = "usage: shbx add [name] [--host host] [--user user] [--port port] [--identity-file path]"
+
+	name := ""
+	flagArgs := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		name = strings.TrimSpace(args[0])
+		flagArgs = args[1:]
 	}
 
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
@@ -74,17 +79,64 @@ func (a App) runAdd(args []string) error {
 	portFlag := fs.Int("port", 0, "SSH port")
 	identityFileFlag := fs.String("identity-file", "", "SSH identity file")
 
-	if err := fs.Parse(args[1:]); err != nil {
-		return fmt.Errorf("usage: shbx add <name> [--host host] [--user user] [--port port] [--identity-file path]")
+	if err := fs.Parse(flagArgs); err != nil {
+		return fmt.Errorf(usage)
 	}
 
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: shbx add <name> [--host host] [--user user] [--port port] [--identity-file path]")
+		return fmt.Errorf(usage)
 	}
 
-	name := strings.TrimSpace(args[0])
+	interactive := isTerminalInput(a.in)
+	var reader *bufio.Reader
+	if interactive {
+		reader = bufio.NewReader(a.in)
+	}
+
 	if name == "" {
-		return errors.New("host name cannot be empty")
+		if !interactive {
+			return errors.New("missing host name; pass it as an argument")
+		}
+
+		var err error
+		name, err = prompt(reader, a.out, "Name")
+		if err != nil {
+			return err
+		}
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return errors.New("host name cannot be empty")
+		}
+	}
+
+	if _, _, err := config.Init(); err != nil {
+		return err
+	}
+
+	path, err := config.Path()
+	if err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	existingHost, existed := cfg.Hosts[name]
+	if existed {
+		if !interactive {
+			return fmt.Errorf("host %q already exists; run shbx edit %s or run shbx add interactively to confirm update", name, name)
+		}
+
+		update, err := confirm(reader, a.out, fmt.Sprintf("Host %q already exists. Update it?", name))
+		if err != nil {
+			return err
+		}
+		if !update {
+			fmt.Fprintln(a.out, "Cancelled.")
+			return nil
+		}
 	}
 
 	host := strings.TrimSpace(*hostFlag)
@@ -92,12 +144,26 @@ func (a App) runAdd(args []string) error {
 	identityFile := strings.TrimSpace(*identityFileFlag)
 	port := *portFlag
 
+	if existed {
+		if !flagWasSet(fs, "host") {
+			host = existingHost.Host
+		}
+		if !flagWasSet(fs, "user") {
+			user = existingHost.User
+		}
+		if !flagWasSet(fs, "port") {
+			port = existingHost.Port
+		}
+		if !flagWasSet(fs, "identity-file") {
+			identityFile = existingHost.IdentityFile
+		}
+	}
+
 	if host == "" {
-		if !isTerminalInput(a.in) {
+		if !interactive {
 			return errors.New("missing SSH host; pass it with --host")
 		}
 
-		reader := bufio.NewReader(a.in)
 		var err error
 
 		host, err = prompt(reader, a.out, "Host")
@@ -130,6 +196,40 @@ func (a App) runAdd(args []string) error {
 		}
 	}
 
+	if interactive && existed && fs.NFlag() == 0 {
+		var err error
+		host, err = promptWithDefault(reader, a.out, "Host", host)
+		if err != nil {
+			return err
+		}
+		user, err = promptWithDefault(reader, a.out, "User (optional)", user)
+		if err != nil {
+			return err
+		}
+
+		currentPort := ""
+		if port != 0 {
+			currentPort = strconv.Itoa(port)
+		}
+		portText, err := promptWithDefault(reader, a.out, fmt.Sprintf("Port (optional, default %d)", defaultSSHPort), currentPort)
+		if err != nil {
+			return err
+		}
+		if portText == "" {
+			port = 0
+		} else {
+			port, err = strconv.Atoi(portText)
+			if err != nil {
+				return fmt.Errorf("invalid port %q", portText)
+			}
+		}
+
+		identityFile, err = promptWithDefault(reader, a.out, "Identity file (optional)", identityFile)
+		if err != nil {
+			return err
+		}
+	}
+
 	if host == "" {
 		return errors.New("SSH host cannot be empty")
 	}
@@ -137,21 +237,6 @@ func (a App) runAdd(args []string) error {
 		return fmt.Errorf("invalid port %d", port)
 	}
 
-	if _, _, err := config.Init(); err != nil {
-		return err
-	}
-
-	path, err := config.Path()
-	if err != nil {
-		return err
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	_, existed := cfg.Hosts[name]
 	cfg.Hosts[name] = config.Host{
 		Host:         host,
 		User:         user,
@@ -488,7 +573,7 @@ Usage:
   shbx <command> [arguments]
 
 Commands:
-  add <name>       Add or update SSH host
+  add [name]       Add or update SSH host
   list             List saved hosts
   show <name>      Show saved host details
   connect <name>   Connect to saved host over SSH
@@ -501,6 +586,8 @@ Commands:
   help             Show this help
 
 Add options:
+  shbx add                     Add host interactively
+  shbx add <name>              Add host with a saved name
   --host <host>                SSH hostname or IP
   --user <user>                SSH username
   --port <port>                SSH port (default: 22)
@@ -562,6 +649,22 @@ func promptWithDefault(reader *bufio.Reader, out io.Writer, label, current strin
 		return current, nil
 	}
 	return text, nil
+}
+
+func confirm(reader *bufio.Reader, out io.Writer, label string) (bool, error) {
+	fmt.Fprintf(out, "%s [y/N]: ", label)
+
+	text, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 func flagWasSet(fs *flag.FlagSet, name string) bool {
