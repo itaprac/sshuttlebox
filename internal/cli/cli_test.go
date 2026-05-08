@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -191,6 +192,103 @@ func TestConnectDryRunWithPasswordUsesSSHPasswordWrapper(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "secret") {
 		t.Fatalf("dry-run leaked password in %q", out.String())
+	}
+}
+
+func TestCompletionListsMatchingHosts(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{Host: "prod.example"})
+	addHost(t, "preprod", config.Host{Host: "preprod.example"})
+	addHost(t, "dev", config.Host{Host: "dev.example"})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"__complete", "hosts", "--", "pr"}); err != nil {
+		t.Fatalf("complete hosts: %v", err)
+	}
+
+	got := out.String()
+	if got != "preprod\nprod\n" {
+		t.Fatalf("completion output = %q, want %q", got, "preprod\nprod\n")
+	}
+}
+
+func TestCompletionScriptMentionsHostCompletingCommands(t *testing.T) {
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"completion", "zsh"}); err != nil {
+		t.Fatalf("completion zsh: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{
+		"#compdef shbx",
+		"connect|show|edit|remove",
+		"shbx __complete hosts",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("zsh completion missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestCompletionInstallZshWritesCompletionAndStartupSnippet(t *testing.T) {
+	home := withTempHome(t)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"completion", "install", "--shell", "zsh"}); err != nil {
+		t.Fatalf("completion install zsh: %v", err)
+	}
+	if err := app.Run([]string{"completion", "install", "--shell", "zsh"}); err != nil {
+		t.Fatalf("completion install zsh second run: %v", err)
+	}
+
+	completionPath := filepath.Join(home, ".local", "share", "shbx", "completions", "zsh", "_shbx")
+	completion, err := os.ReadFile(completionPath)
+	if err != nil {
+		t.Fatalf("read zsh completion: %v", err)
+	}
+	if !strings.Contains(string(completion), "#compdef shbx") {
+		t.Fatalf("unexpected zsh completion content %q", string(completion))
+	}
+
+	zshrcPath := filepath.Join(home, ".zshrc")
+	zshrc, err := os.ReadFile(zshrcPath)
+	if err != nil {
+		t.Fatalf("read zshrc: %v", err)
+	}
+	if got := strings.Count(string(zshrc), "# shbx completion"); got != 1 {
+		t.Fatalf("expected one shbx startup block, got %d in %q", got, string(zshrc))
+	}
+	if !strings.Contains(string(zshrc), "fpath=(") || !strings.Contains(string(zshrc), "compinit") {
+		t.Fatalf("zshrc missing fpath or compinit setup in %q", string(zshrc))
+	}
+}
+
+func TestCompletionInstallAllNoRCWritesCompletionFiles(t *testing.T) {
+	home := withTempHome(t)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"completion", "install", "--shell", "all", "--no-rc"}); err != nil {
+		t.Fatalf("completion install all no-rc: %v", err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(home, ".local", "share", "shbx", "completions", "bash", "shbx"),
+		filepath.Join(home, ".local", "share", "shbx", "completions", "zsh", "_shbx"),
+		filepath.Join(home, ".config", "fish", "completions", "shbx.fish"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected completion file %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".zshrc")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no zshrc with --no-rc, got err %v", err)
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,6 +62,10 @@ func (a App) Run(args []string) error {
 		return a.runEdit(args[1:])
 	case "remove":
 		return a.runRemove(args[1:])
+	case "completion":
+		return a.runCompletion(args[1:])
+	case "__complete":
+		return a.runComplete(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q; run: shbx help", args[0])
 	}
@@ -658,6 +664,87 @@ func (a App) runConfig(args []string) error {
 	}
 }
 
+func (a App) runCompletion(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: shbx completion <bash|zsh|fish|install>")
+	}
+	if args[0] == "install" {
+		return a.runCompletionInstall(args[1:])
+	}
+	if len(args) != 1 {
+		return errors.New("usage: shbx completion <bash|zsh|fish|install>")
+	}
+
+	switch args[0] {
+	case "bash":
+		fmt.Fprint(a.out, bashCompletionScript)
+	case "zsh":
+		fmt.Fprint(a.out, zshCompletionScript)
+	case "fish":
+		fmt.Fprint(a.out, fishCompletionScript)
+	default:
+		return fmt.Errorf("unknown shell %q; available: bash, zsh, fish", args[0])
+	}
+	return nil
+}
+
+func (a App) runCompletionInstall(args []string) error {
+	fs := flag.NewFlagSet("completion install", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	shellFlag := fs.String("shell", "auto", "Shell to install completion for: auto, all, bash, zsh, fish")
+	noRCFlag := fs.Bool("no-rc", false, "Do not update shell startup files")
+	if err := fs.Parse(args); err != nil {
+		return errors.New("usage: shbx completion install [--shell auto|all|bash|zsh|fish] [--no-rc]")
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: shbx completion install [--shell auto|all|bash|zsh|fish] [--no-rc]")
+	}
+
+	shells, err := completionInstallShells(*shellFlag)
+	if err != nil {
+		return err
+	}
+
+	for _, shell := range shells {
+		result, err := installCompletion(shell, !*noRCFlag)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(a.out, "Installed %s completion: %s\n", shell, result.completionPath)
+		for _, path := range result.updatedRCFiles {
+			fmt.Fprintf(a.out, "Updated startup file: %s\n", path)
+		}
+		for _, path := range result.unchangedRCFiles {
+			fmt.Fprintf(a.out, "Startup file already configured: %s\n", path)
+		}
+		for _, note := range result.notes {
+			fmt.Fprintln(a.out, note)
+		}
+	}
+	return nil
+}
+
+func (a App) runComplete(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+
+	switch args[0] {
+	case "commands":
+		prefix := completePrefix(args[1:])
+		for _, command := range completeCommandNames(prefix) {
+			fmt.Fprintln(a.out, command)
+		}
+	case "hosts":
+		prefix := completePrefix(args[1:])
+		for _, name := range completeHostNames(prefix) {
+			fmt.Fprintln(a.out, name)
+		}
+	}
+	return nil
+}
+
 func (a App) printHelp() {
 	fmt.Fprint(a.out, `sshuttlebox (shbx) - SSH connection helper
 
@@ -671,6 +758,7 @@ Commands:
   connect <name>   Connect to saved host over SSH
   edit <name>      Edit saved host
   remove <name>    Remove saved host
+  completion       Generate shell completion script
   config init      Create config file if it does not exist
   config path      Print config file path
   config status    Show config file status
@@ -701,8 +789,348 @@ Connect options:
 Remove options:
   --yes                        Remove without confirmation
   --force                      Alias for --yes
+
+Completion:
+  shbx completion zsh           Print zsh completion script
+  shbx completion bash          Print bash completion script
+  shbx completion fish          Print fish completion script
+  shbx completion install       Install completion for the current shell
+  shbx completion install --shell all
+                                Install completion for bash, zsh, and fish
 `)
 }
+
+type completionInstallResult struct {
+	completionPath   string
+	updatedRCFiles   []string
+	unchangedRCFiles []string
+	notes            []string
+}
+
+func completionInstallShells(shell string) ([]string, error) {
+	switch shell {
+	case "auto":
+		detected := detectShellName()
+		switch detected {
+		case "bash", "zsh", "fish":
+			return []string{detected}, nil
+		case "":
+			return nil, errors.New("cannot detect shell; pass --shell bash, --shell zsh, --shell fish, or --shell all")
+		default:
+			return nil, fmt.Errorf("unsupported shell %q; pass --shell bash, --shell zsh, --shell fish, or --shell all", detected)
+		}
+	case "all":
+		return []string{"bash", "zsh", "fish"}, nil
+	case "bash", "zsh", "fish":
+		return []string{shell}, nil
+	default:
+		return nil, fmt.Errorf("unsupported shell %q; available: auto, all, bash, zsh, fish", shell)
+	}
+}
+
+func detectShellName() string {
+	shell := strings.TrimSpace(os.Getenv("SHELL"))
+	if shell == "" {
+		return ""
+	}
+	return filepath.Base(shell)
+}
+
+func installCompletion(shell string, updateRC bool) (completionInstallResult, error) {
+	switch shell {
+	case "bash":
+		return installBashCompletion(updateRC)
+	case "zsh":
+		return installZshCompletion(updateRC)
+	case "fish":
+		return installFishCompletion()
+	default:
+		return completionInstallResult{}, fmt.Errorf("unsupported shell %q", shell)
+	}
+}
+
+func installBashCompletion(updateRC bool) (completionInstallResult, error) {
+	path, err := userDataPath("shbx", "completions", "bash", "shbx")
+	if err != nil {
+		return completionInstallResult{}, err
+	}
+	if err := writeCompletionFile(path, bashCompletionScript); err != nil {
+		return completionInstallResult{}, err
+	}
+
+	result := completionInstallResult{completionPath: path}
+	if updateRC {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return completionInstallResult{}, err
+		}
+		snippet := fmt.Sprintf(`
+# shbx completion
+if [ -r %q ]; then
+  source %q
+fi
+`, path, path)
+		rcFiles := []string{filepath.Join(home, ".bashrc")}
+		if runtime.GOOS == "darwin" {
+			rcFiles = append(rcFiles, filepath.Join(home, ".bash_profile"))
+		}
+		updated, unchanged, err := ensureStartupSnippet(rcFiles, "# shbx completion", snippet)
+		if err != nil {
+			return completionInstallResult{}, err
+		}
+		result.updatedRCFiles = updated
+		result.unchangedRCFiles = unchanged
+	}
+	return result, nil
+}
+
+func installZshCompletion(updateRC bool) (completionInstallResult, error) {
+	dir, err := userDataPath("shbx", "completions", "zsh")
+	if err != nil {
+		return completionInstallResult{}, err
+	}
+	path := filepath.Join(dir, "_shbx")
+	if err := writeCompletionFile(path, zshCompletionScript); err != nil {
+		return completionInstallResult{}, err
+	}
+
+	result := completionInstallResult{completionPath: path}
+	if updateRC {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return completionInstallResult{}, err
+		}
+		zshrc := filepath.Join(home, ".zshrc")
+		snippet := fmt.Sprintf(`
+# shbx completion
+if [ -d %q ]; then
+  fpath=(%q $fpath)
+fi
+autoload -Uz compinit
+compinit
+`, dir, dir)
+		updated, unchanged, err := ensureStartupSnippet([]string{zshrc}, "# shbx completion", snippet)
+		if err != nil {
+			return completionInstallResult{}, err
+		}
+		result.updatedRCFiles = updated
+		result.unchangedRCFiles = unchanged
+	}
+	return result, nil
+}
+
+func installFishCompletion() (completionInstallResult, error) {
+	path, err := userConfigPath("fish", "completions", "shbx.fish")
+	if err != nil {
+		return completionInstallResult{}, err
+	}
+	if err := writeCompletionFile(path, fishCompletionScript); err != nil {
+		return completionInstallResult{}, err
+	}
+	return completionInstallResult{
+		completionPath: path,
+		notes:          []string{"Fish loads completions from this directory automatically."},
+	}, nil
+}
+
+func userDataPath(parts ...string) (string, error) {
+	base := strings.TrimSpace(os.Getenv("XDG_DATA_HOME"))
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(append([]string{base}, parts...)...), nil
+}
+
+func userConfigPath(parts ...string) (string, error) {
+	base := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(home, ".config")
+	}
+	return filepath.Join(append([]string{base}, parts...)...), nil
+}
+
+func writeCompletionFile(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+func ensureStartupSnippet(paths []string, marker, snippet string) ([]string, []string, error) {
+	var updated []string
+	var unchanged []string
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		changed, err := appendStartupSnippet(path, marker, snippet)
+		if err != nil {
+			return nil, nil, err
+		}
+		if changed {
+			updated = append(updated, path)
+		} else {
+			unchanged = append(unchanged, path)
+		}
+	}
+	return updated, unchanged, nil
+}
+
+func appendStartupSnippet(path, marker, snippet string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if strings.Contains(string(data), marker) {
+		return false, nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		if _, err := file.WriteString("\n"); err != nil {
+			return false, err
+		}
+	}
+	if _, err := file.WriteString(snippet); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func completePrefix(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	if args[0] == "--" {
+		if len(args) < 2 {
+			return ""
+		}
+		return args[1]
+	}
+	return args[0]
+}
+
+func completeCommandNames(prefix string) []string {
+	commands := []string{"add", "list", "show", "connect", "edit", "remove", "completion", "config", "version", "help"}
+	return filterSortedPrefix(commands, prefix)
+}
+
+func completeHostNames(prefix string) []string {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+
+	names := make([]string, 0, len(cfg.Hosts))
+	for name := range cfg.Hosts {
+		names = append(names, name)
+	}
+	return filterSortedPrefix(names, prefix)
+}
+
+func filterSortedPrefix(values []string, prefix string) []string {
+	matches := values[:0]
+	for _, value := range values {
+		if strings.HasPrefix(value, prefix) {
+			matches = append(matches, value)
+		}
+	}
+	sort.Strings(matches)
+	return matches
+}
+
+const bashCompletionScript = `_shbx_completion()
+{
+    local cur prev
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    if [[ ${COMP_CWORD} -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "$(shbx __complete commands -- "$cur")" -- "$cur") )
+        return 0
+    fi
+
+    case "${COMP_WORDS[1]}" in
+        connect|show|edit|remove)
+            if [[ ${COMP_CWORD} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "$(shbx __complete hosts -- "$cur")" -- "$cur") )
+                return 0
+            fi
+            ;;
+        completion)
+            if [[ ${COMP_CWORD} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") )
+                return 0
+            fi
+            ;;
+    esac
+}
+complete -F _shbx_completion shbx
+`
+
+const zshCompletionScript = `#compdef shbx
+
+_shbx() {
+  local -a commands hosts shells
+
+  if (( CURRENT == 2 )); then
+    commands=("${(@f)$(shbx __complete commands -- "$words[CURRENT]")}")
+    _describe 'commands' commands
+    return
+  fi
+
+  case "$words[2]" in
+    connect|show|edit|remove)
+      if (( CURRENT == 3 )); then
+        hosts=("${(@f)$(shbx __complete hosts -- "$words[CURRENT]")}")
+        _describe 'saved hosts' hosts
+        return
+      fi
+      ;;
+    completion)
+      if (( CURRENT == 3 )); then
+        shells=(bash zsh fish)
+        _describe 'shells' shells
+        return
+      fi
+      ;;
+  esac
+}
+
+compdef _shbx shbx
+`
+
+const fishCompletionScript = `function __shbx_needs_command
+    set -l cmd (commandline -opc)
+    test (count $cmd) -eq 1
+end
+
+function __shbx_using_command
+    set -l cmd (commandline -opc)
+    test (count $cmd) -ge 2; and test $cmd[2] = $argv[1]
+end
+
+complete -c shbx -n '__shbx_needs_command' -a '(shbx __complete commands -- (commandline -ct))'
+complete -c shbx -n '__shbx_using_command connect; or __shbx_using_command show; or __shbx_using_command edit; or __shbx_using_command remove' -a '(shbx __complete hosts -- (commandline -ct))'
+complete -c shbx -n '__shbx_using_command completion' -a 'bash zsh fish'
+`
 
 func buildSSHArgs(host config.Host) []string {
 	port := host.Port
