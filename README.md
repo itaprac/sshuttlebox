@@ -1,59 +1,81 @@
-# sshuttlebox / shbx
+# sshuttlebox
 
 [![CI](https://github.com/itaprac/sshuttlebox/actions/workflows/ci.yml/badge.svg)](https://github.com/itaprac/sshuttlebox/actions/workflows/ci.yml)
 
-`sshuttlebox` is a small CLI for saving SSH hosts and connecting to them with the `shbx` command.
+`sshuttlebox` is a small SSH connection manager for the terminal. It stores named
+SSH hosts locally and lets you connect with the short `shbx` command.
 
-It stores hosts locally in `~/.config/sshuttlebox/config.json` and uses the system `ssh` command for connections.
-Saved passwords can be used for automatic login.
+```bash
+shbx connect prod
+```
 
 ## Features
 
-- Add SSH hosts interactively or with flags
-- List saved hosts with `NAME`, `TARGET`, and `KEY`
-- Preview SSH commands with `connect --dry-run`
-- Save SSH passwords and connect without external password helpers
-- Connect, edit, rename, and remove saved hosts
-- Shell autocomplete for saved host names
-- Confirmation prompts for overwrites and removals
+- Save SSH hosts under short names
+- Add hosts interactively or with flags
+- List, show, edit, rename, and remove saved hosts
+- Connect through the system `ssh` command
+- Preview generated SSH commands with `--dry-run`
+- Optional password-based automatic login
+- Shell completion for saved host names
 - Warnings for missing SSH identity files
 
-## Install
+## Installation
 
-Requires Go 1.22+.
-
-```bash
-go install github.com/itaprac/sshuttlebox/cmd/shbx@latest
-```
-
-Update to the latest version with the same command:
+Requires Go 1.22 or newer.
 
 ```bash
 go install github.com/itaprac/sshuttlebox/cmd/shbx@latest
 ```
 
-Supported targets: macOS and Linux.
+Make sure your Go binary directory is in `PATH`. For most Go installations:
+
+```bash
+export PATH="$HOME/go/bin:$PATH"
+```
+
+Supported platforms: macOS and Linux.
+
+## Quick Start
+
+Create the local config file:
+
+```bash
+shbx config init
+```
+
+Add a host:
+
+```bash
+shbx add prod --host 192.0.2.10 --user deploy --port 22 --identity-file ~/.ssh/id_ed25519
+```
+
+Connect to it:
+
+```bash
+shbx connect prod
+```
+
+Preview the command without connecting:
+
+```bash
+shbx connect prod --dry-run
+```
 
 ## Usage
 
 ```bash
-shbx config init
-shbx add
-shbx add prod --host 192.0.2.10 --user deploy --port 22 --identity-file ~/.ssh/id_ed25519
-shbx add legacy --host 192.0.2.20 --user admin --password 'secret'
+shbx add [name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]
 shbx list
-shbx show prod
-shbx connect prod --dry-run
-shbx connect prod
-shbx edit prod --name staging --host 192.0.2.11 --user deploy --password '' --port 2222
-shbx remove staging
-shbx remove staging --yes
+shbx show <name>
+shbx connect <name> [--dry-run|--print]
+shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]
+shbx remove <name> [--yes|--force]
 ```
 
-## Shell autocomplete
+Run `shbx help` for the full command reference.
 
-`shbx` can generate completion scripts that autocomplete saved host names for
-`connect`, `show`, `edit`, and `remove`.
+## Shell Completion
 
 Install completion for your current shell:
 
@@ -61,14 +83,13 @@ Install completion for your current shell:
 shbx completion install
 ```
 
-Or install completion files for every supported shell:
+Install completion files for all supported shells:
 
 ```bash
 shbx completion install --shell all
 ```
 
-The installer uses user-level paths, so it works without `sudo` on macOS and
-Linux:
+The installer uses user-level paths and works without `sudo`:
 
 ```text
 bash: ~/.local/share/shbx/completions/bash/shbx
@@ -80,7 +101,7 @@ For bash and zsh, `shbx completion install` also adds a small startup block to
 `~/.bashrc`, `~/.bash_profile` on macOS, or `~/.zshrc`. Fish loads completions
 from `~/.config/fish/completions` automatically.
 
-If you only want to print a script:
+To print a completion script instead of installing it:
 
 ```bash
 shbx completion bash
@@ -88,19 +109,23 @@ shbx completion zsh
 shbx completion fish
 ```
 
-For package managers, install the printed scripts into the package manager's
-completion directory instead, for example:
+## Configuration
 
-```bash
-shbx completion zsh > /usr/local/share/zsh/site-functions/_shbx
-```
-
-Example list output:
+Hosts are stored in:
 
 ```text
-NAME             TARGET                       KEY
-prod             deploy@192.0.2.10:22         ~/.ssh/id_ed25519
+~/.config/sshuttlebox/config.json
 ```
+
+Useful config commands:
+
+```bash
+shbx config path
+shbx config status
+```
+
+Saved passwords are stored in the local config file. Prefer SSH keys when
+possible.
 
 ## Development
 
