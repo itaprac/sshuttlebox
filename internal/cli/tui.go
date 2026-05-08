@@ -27,6 +27,7 @@ const (
 	tuiScreenRemove
 	tuiScreenPreview
 	tuiScreenKeySelect
+	tuiScreenHostSelect
 )
 
 type tuiMode int
@@ -97,6 +98,8 @@ type tuiModel struct {
 	editTunnelOld string
 	keyPick       []identityFileChoice
 	keyCursor     int
+	hostPick      []string
+	hostCursor    int
 	help          help.Model
 	keys          tuiKeyMap
 }
@@ -112,6 +115,7 @@ type tuiKeyMap struct {
 	Switch   key.Binding
 	Filter   key.Binding
 	ReuseKey key.Binding
+	PickHost key.Binding
 	Save     key.Binding
 	Cancel   key.Binding
 	Help     key.Binding
@@ -130,6 +134,7 @@ func newTUIKeyMap() tuiKeyMap {
 		Switch:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "hosts/tunnels")),
 		Filter:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		ReuseKey: key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "reuse key")),
+		PickHost: key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "pick host")),
 		Save:     key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "save")),
 		Cancel:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
@@ -261,6 +266,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updatePreview(msg)
 		case tuiScreenKeySelect:
 			return m.updateKeySelect(msg)
+		case tuiScreenHostSelect:
+			return m.updateHostSelect(msg)
 		}
 	}
 
@@ -450,7 +457,16 @@ func (m tuiModel) updateTunnelForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Cancel):
 		m.screen = tuiScreenMain
 		m.inputs = nil
+		m.hostPick = nil
 		m.status = "Cancelled."
+		m.err = nil
+		return m, nil
+	case key.Matches(msg, m.keys.PickHost):
+		if !m.openHostSelect() {
+			m.setError(errors.New("no saved hosts to choose"))
+			return m, nil
+		}
+		m.status = ""
 		m.err = nil
 		return m, nil
 	case key.Matches(msg, m.keys.Quit):
@@ -507,6 +523,42 @@ func (m tuiModel) updateKeySelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = tuiScreenForm
 		m.status = "Reused identity file."
 		m.err = nil
+	}
+	return m, nil
+}
+
+func (m tuiModel) updateHostSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Cancel):
+		m.screen = tuiScreenTunnelForm
+		m.status = "Host selection cancelled."
+		m.err = nil
+		m.hostPick = nil
+		return m, nil
+	case key.Matches(msg, m.keys.Up):
+		if m.hostCursor > 0 {
+			m.hostCursor--
+		}
+	case key.Matches(msg, m.keys.Down):
+		if m.hostCursor < len(m.hostPick)-1 {
+			m.hostCursor++
+		}
+	case key.Matches(msg, m.keys.Connect), msg.String() == "enter":
+		if len(m.hostPick) == 0 || m.hostCursor < 0 || m.hostCursor >= len(m.hostPick) {
+			m.screen = tuiScreenTunnelForm
+			m.setError(errors.New("no host selected"))
+			return m, nil
+		}
+		m.inputs[m.focus].Blur()
+		m.inputs[tuiTunnelFieldHost].SetValue(m.hostPick[m.hostCursor])
+		m.focus = tuiTunnelFieldHost
+		m.inputs[m.focus].Focus()
+		m.screen = tuiScreenTunnelForm
+		m.status = "Selected SSH host."
+		m.err = nil
+		m.hostPick = nil
 	}
 	return m, nil
 }
@@ -589,6 +641,8 @@ func (m tuiModel) View() string {
 		body = m.previewView()
 	case tuiScreenKeySelect:
 		body = m.keySelectView()
+	case tuiScreenHostSelect:
+		body = m.hostSelectView()
 	default:
 		body = m.mainView()
 	}
@@ -940,8 +994,12 @@ func (m tuiModel) tunnelFormView() string {
 	}
 	lines := []string{titleStyle.Render(title), ""}
 	labels := []string{"Name", "SSH host", "Type", "Bind address", "Local port", "Remote host", "Remote port"}
+	hasHosts := len(m.cfg.Hosts) > 0
 	for i, input := range m.inputs {
 		label := labels[i]
+		if i == tuiTunnelFieldHost && hasHosts {
+			label += " " + mutedStyle.Render("(ctrl+h)")
+		}
 		if i == m.focus {
 			label = "> " + label
 		} else {
@@ -949,7 +1007,7 @@ func (m tuiModel) tunnelFormView() string {
 		}
 		lines = append(lines, labelStyle.Render(label), input.View())
 	}
-	helpText := "type: local/remote/dynamic  tab/down: next  enter/ctrl+s: save  esc: cancel"
+	helpText := "type: local/remote/dynamic  ctrl+h: choose host  tab/down: next  enter/ctrl+s: save  esc: cancel"
 	lines = append(lines, "", mutedStyle.Render(helpText))
 	return strings.Join(lines, "\n")
 }
@@ -967,6 +1025,29 @@ func (m tuiModel) keySelectView() string {
 		for i, choice := range m.keyPick {
 			line := fitRow(identityFileChoiceLabel(choice), width-2)
 			if i == m.keyCursor {
+				lines = append(lines, selectedStyle.Render(fitRow("> "+line, width)))
+			} else {
+				lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
+			}
+		}
+	}
+	lines = append(lines, "", mutedStyle.Render("up/down: select  enter: use  esc: back"))
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) hostSelectView() string {
+	width := maxInt(56, minInt(84, m.width-4))
+	if m.width == 0 {
+		width = 68
+	}
+
+	lines := []string{titleStyle.Render("Choose SSH host"), ""}
+	if len(m.hostPick) == 0 {
+		lines = append(lines, mutedStyle.Render("No saved hosts."))
+	} else {
+		for i, name := range m.hostPick {
+			line := fitRow(fmt.Sprintf("%s (%s)", name, formatListTarget(m.cfg.Hosts[name])), width-2)
+			if i == m.hostCursor {
 				lines = append(lines, selectedStyle.Render(fitRow("> "+line, width)))
 			} else {
 				lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
@@ -1223,6 +1304,9 @@ func (m tuiModel) openTunnelForm(name string, tunnel config.Tunnel) (tea.Model, 
 	m.focus = 0
 	m.editOld = ""
 	m.editTunnelOld = name
+	m.keyPick = nil
+	m.hostPick = nil
+	m.hostCursor = 0
 	m.screen = tuiScreenTunnelForm
 	m.status = ""
 	m.err = nil
@@ -1262,6 +1346,31 @@ func (m *tuiModel) openKeySelect() bool {
 	m.keyPick = choices
 	m.keyCursor = cursor
 	m.screen = tuiScreenKeySelect
+	return true
+}
+
+func (m *tuiModel) openHostSelect() bool {
+	names := make([]string, 0, len(m.cfg.Hosts))
+	for name := range m.cfg.Hosts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return false
+	}
+
+	current := strings.TrimSpace(m.inputs[tuiTunnelFieldHost].Value())
+	cursor := 0
+	for i, name := range names {
+		if name == current {
+			cursor = i
+			break
+		}
+	}
+
+	m.hostPick = names
+	m.hostCursor = cursor
+	m.screen = tuiScreenHostSelect
 	return true
 }
 
@@ -1315,6 +1424,7 @@ func (m *tuiModel) saveForm() error {
 	m.screen = tuiScreenMain
 	m.inputs = nil
 	m.keyPick = nil
+	m.hostPick = nil
 	action := "Added"
 	if m.editOld != "" {
 		action = "Updated"
@@ -1388,6 +1498,7 @@ func (m *tuiModel) saveTunnelForm() error {
 	}
 	m.screen = tuiScreenMain
 	m.inputs = nil
+	m.hostPick = nil
 	action := "Added"
 	if m.editTunnelOld != "" {
 		action = "Updated"

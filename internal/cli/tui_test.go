@@ -143,6 +143,43 @@ func TestTUIFormCanChooseExistingIdentityFile(t *testing.T) {
 	}
 }
 
+func TestTUITunnelFormCanChooseExistingHost(t *testing.T) {
+	withTempHome(t)
+	path, _, err := config.Init()
+	if err != nil {
+		t.Fatalf("init config: %v", err)
+	}
+	cfg := config.Default()
+	cfg.Hosts["bastion"] = config.Host{Host: "bastion.example", User: "deploy"}
+	cfg.Hosts["prod"] = config.Host{Host: "prod.example", User: "deploy"}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	model := newTUIModelWithState(path, cfg, nil)
+	model = openTUITunnelForm(t, model, "", config.Tunnel{})
+
+	updated, _ := model.updateTunnelForm(tea.KeyMsg{Type: tea.KeyCtrlH})
+	model = updated.(tuiModel)
+	if model.screen != tuiScreenHostSelect {
+		t.Fatalf("screen = %v, want host select", model.screen)
+	}
+	if len(model.hostPick) != 2 {
+		t.Fatalf("host choices = %d, want 2", len(model.hostPick))
+	}
+
+	updated, _ = model.updateHostSelect(keyMsg(tea.KeyDown))
+	model = updated.(tuiModel)
+	updated, _ = model.updateHostSelect(keyMsg(tea.KeyEnter))
+	model = updated.(tuiModel)
+	if got := model.inputs[tuiTunnelFieldHost].Value(); got != "prod" {
+		t.Fatalf("SSH host after selection = %q, want prod", got)
+	}
+	if model.screen != tuiScreenTunnelForm {
+		t.Fatalf("screen after selection = %v, want tunnel form", model.screen)
+	}
+}
+
 func TestTUIConnectActionQuitsWithSelectedHost(t *testing.T) {
 	model := newTUIModelWithState("", config.Config{
 		Version: 1,
