@@ -61,6 +61,9 @@ func TestInitExistsAndLoad(t *testing.T) {
 	if len(cfg.Hosts) != 0 {
 		t.Fatalf("Hosts = %v, want empty", cfg.Hosts)
 	}
+	if len(cfg.Tunnels) != 0 {
+		t.Fatalf("Tunnels = %v, want empty", cfg.Tunnels)
+	}
 
 	_, created, err = Init()
 	if err != nil {
@@ -98,6 +101,36 @@ func TestSaveAndLoadHosts(t *testing.T) {
 	}
 	if got.Hosts["prod"] != cfg.Hosts["prod"] {
 		t.Fatalf("loaded host = %+v, want %+v", got.Hosts["prod"], cfg.Hosts["prod"])
+	}
+}
+
+func TestSaveAndLoadTunnels(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	path, _, err := Init()
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	cfg := Default()
+	cfg.Tunnels["db"] = Tunnel{
+		Host:       "prod",
+		Type:       "local",
+		LocalPort:  5432,
+		RemoteHost: "127.0.0.1",
+		RemotePort: 5432,
+	}
+
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Tunnels["db"] != cfg.Tunnels["db"] {
+		t.Fatalf("loaded tunnel = %+v, want %+v", got.Tunnels["db"], cfg.Tunnels["db"])
 	}
 }
 

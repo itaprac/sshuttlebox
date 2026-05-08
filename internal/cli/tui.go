@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -16,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/itaprac/sshuttlebox/internal/config"
 	"github.com/itaprac/sshuttlebox/internal/history"
+	"github.com/itaprac/sshuttlebox/internal/tunnelstate"
 )
 
 type tuiScreen int
@@ -23,9 +23,17 @@ type tuiScreen int
 const (
 	tuiScreenMain tuiScreen = iota
 	tuiScreenForm
+	tuiScreenTunnelForm
 	tuiScreenRemove
 	tuiScreenPreview
 	tuiScreenKeySelect
+)
+
+type tuiMode int
+
+const (
+	tuiModeHosts tuiMode = iota
+	tuiModeTunnels
 )
 
 const (
@@ -39,6 +47,17 @@ const (
 )
 
 const (
+	tuiTunnelFieldName = iota
+	tuiTunnelFieldHost
+	tuiTunnelFieldType
+	tuiTunnelFieldBind
+	tuiTunnelFieldLocalPort
+	tuiTunnelFieldRemoteHost
+	tuiTunnelFieldRemotePort
+	tuiTunnelFieldCount
+)
+
+const (
 	tuiSectionRecent = iota
 	tuiSectionAll
 )
@@ -49,27 +68,37 @@ type tuiHostItem struct {
 	section int
 }
 
-type tuiModel struct {
-	path        string
-	cfg         config.Config
-	names       []string
-	hist        history.Log
-	cursor      int
-	width       int
-	height      int
-	screen      tuiScreen
-	status      string
-	err         error
-	connectName string
+type tuiTunnelItem struct {
+	name   string
+	tunnel config.Tunnel
+}
 
-	filter    textinput.Model
-	inputs    []textinput.Model
-	focus     int
-	editOld   string
-	keyPick   []identityFileChoice
-	keyCursor int
-	help      help.Model
-	keys      tuiKeyMap
+type tuiModel struct {
+	path         string
+	cfg          config.Config
+	names        []string
+	tunnelNames  []string
+	hist         history.Log
+	cursor       int
+	tunnelCursor int
+	mode         tuiMode
+	width        int
+	height       int
+	screen       tuiScreen
+	status       string
+	err          error
+	connectName  string
+	tunnelName   string
+
+	filter        textinput.Model
+	inputs        []textinput.Model
+	focus         int
+	editOld       string
+	editTunnelOld string
+	keyPick       []identityFileChoice
+	keyCursor     int
+	help          help.Model
+	keys          tuiKeyMap
 }
 
 type tuiKeyMap struct {
@@ -80,6 +109,7 @@ type tuiKeyMap struct {
 	Add      key.Binding
 	Edit     key.Binding
 	Remove   key.Binding
+	Switch   key.Binding
 	Filter   key.Binding
 	ReuseKey key.Binding
 	Save     key.Binding
@@ -97,6 +127,7 @@ func newTUIKeyMap() tuiKeyMap {
 		Add:      key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
 		Edit:     key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 		Remove:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "remove")),
+		Switch:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "hosts/tunnels")),
 		Filter:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		ReuseKey: key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "reuse key")),
 		Save:     key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "save")),
@@ -107,13 +138,13 @@ func newTUIKeyMap() tuiKeyMap {
 }
 
 func (k tuiKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Connect, k.Preview, k.Add, k.Edit, k.Remove, k.Filter, k.Help, k.Quit}
+	return []key.Binding{k.Connect, k.Preview, k.Add, k.Edit, k.Remove, k.Switch, k.Filter, k.Help, k.Quit}
 }
 
 func (k tuiKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Connect, k.Preview},
-		{k.Add, k.Edit, k.Remove, k.Filter},
+		{k.Add, k.Edit, k.Remove, k.Switch, k.Filter},
 		{k.ReuseKey, k.Save, k.Cancel, k.Help, k.Quit},
 	}
 }
@@ -123,18 +154,42 @@ func (a App) runUI(args []string) error {
 		return errors.New("usage: shbx ui")
 	}
 
-	model := newTUIModel()
-	program := tea.NewProgram(model, tea.WithAltScreen())
-	finalModel, err := program.Run()
-	if err != nil {
-		return err
-	}
+	nextMode := tuiModeHosts
+	nextStatus := ""
+	for {
+		model := newTUIModel()
+		model.mode = nextMode
+		if model.mode == tuiModeTunnels {
+			model.filter.Placeholder = "filter tunnels"
+			model.ensureTunnelCursor()
+		}
+		if nextStatus != "" {
+			model.status = nextStatus
+			model.err = nil
+		}
 
-	tui, ok := finalModel.(tuiModel)
-	if !ok || tui.connectName == "" {
-		return nil
+		program := tea.NewProgram(model, tea.WithAltScreen())
+		finalModel, err := program.Run()
+		if err != nil {
+			return err
+		}
+
+		tui, ok := finalModel.(tuiModel)
+		if !ok {
+			return nil
+		}
+		if tui.connectName != "" {
+			return a.runConnect([]string{tui.connectName})
+		}
+		if tui.tunnelName == "" {
+			return nil
+		}
+		if err := a.runTunnelStart([]string{tui.tunnelName}); err != nil {
+			return err
+		}
+		nextMode = tuiModeTunnels
+		nextStatus = fmt.Sprintf("Returned after starting tunnel %q.", tui.tunnelName)
 	}
-	return a.runConnect([]string{tui.connectName})
 }
 
 func newTUIModel() tuiModel {
@@ -167,7 +222,11 @@ func newTUIModelWithState(path string, cfg config.Config, err error) tuiModel {
 	if model.cfg.Hosts == nil {
 		model.cfg.Hosts = map[string]config.Host{}
 	}
+	if model.cfg.Tunnels == nil {
+		model.cfg.Tunnels = map[string]config.Tunnel{}
+	}
 	model.reloadNames()
+	model.reloadTunnelNames()
 	if err != nil {
 		model.err = err
 	}
@@ -194,6 +253,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateMain(msg)
 		case tuiScreenForm:
 			return m.updateForm(msg)
+		case tuiScreenTunnelForm:
+			return m.updateTunnelForm(msg)
 		case tuiScreenRemove:
 			return m.updateRemove(msg)
 		case tuiScreenPreview:
@@ -206,7 +267,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.screen == tuiScreenMain && m.filter.Focused() {
 		var cmd tea.Cmd
 		m.filter, cmd = m.filter.Update(msg)
-		m.ensureCursor()
+		m.ensureActiveCursor()
 		return m, cmd
 	}
 	return m, nil
@@ -223,7 +284,7 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.filter, cmd = m.filter.Update(msg)
-		m.ensureCursor()
+		m.ensureActiveCursor()
 		return m, cmd
 	}
 
@@ -232,17 +293,43 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Help):
 		m.help.ShowAll = !m.help.ShowAll
+	case key.Matches(msg, m.keys.Switch):
+		m.toggleMode()
 	case key.Matches(msg, m.keys.Filter):
 		return m.focusFilter()
 	case key.Matches(msg, m.keys.Up):
-		if m.cursor > 0 {
+		if m.mode == tuiModeTunnels && m.tunnelCursor > 0 {
+			m.tunnelCursor--
+		} else if m.mode == tuiModeHosts && m.cursor > 0 {
 			m.cursor--
 		}
 	case key.Matches(msg, m.keys.Down):
-		if m.cursor < len(m.filteredItems())-1 {
+		if m.mode == tuiModeTunnels && m.tunnelCursor < len(m.filteredTunnelItems())-1 {
+			m.tunnelCursor++
+		} else if m.mode == tuiModeHosts && m.cursor < len(m.filteredItems())-1 {
 			m.cursor++
 		}
 	case key.Matches(msg, m.keys.Connect):
+		if m.mode == tuiModeTunnels {
+			item, ok := m.selectedTunnelItem()
+			if !ok {
+				m.setError(errors.New("no tunnel selected"))
+				return m, nil
+			}
+			if _, running, err := tunnelstate.Get(item.name); err != nil {
+				m.setError(err)
+				return m, nil
+			} else if !running {
+				if host, ok := m.cfg.Hosts[item.tunnel.Host]; ok && host.Password == "" {
+					m.tunnelName = item.name
+					return m, tea.Quit
+				}
+			}
+			if err := m.toggleTunnel(item.name, item.tunnel); err != nil {
+				m.setError(err)
+			}
+			return m, nil
+		}
 		item, ok := m.selectedItem()
 		if !ok {
 			m.setError(errors.New("no host selected"))
@@ -251,6 +338,27 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.connectName = item.name
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Preview):
+		if m.mode == tuiModeTunnels {
+			item, ok := m.selectedTunnelItem()
+			if !ok {
+				m.setError(errors.New("no tunnel selected"))
+				return m, nil
+			}
+			host, ok := m.cfg.Hosts[item.tunnel.Host]
+			if !ok {
+				m.setError(fmt.Errorf("host %q for tunnel %q not found", item.tunnel.Host, item.name))
+				return m, nil
+			}
+			sshArgs, err := buildTunnelStartSSHArgs(item.name, host, item.tunnel)
+			if err != nil {
+				m.setError(err)
+				return m, nil
+			}
+			m.status = tunnelCommandString(host, sshArgs)
+			m.err = nil
+			m.screen = tuiScreenPreview
+			return m, nil
+		}
 		item, ok := m.selectedItem()
 		if !ok {
 			m.setError(errors.New("no host selected"))
@@ -260,8 +368,19 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.screen = tuiScreenPreview
 	case key.Matches(msg, m.keys.Add):
+		if m.mode == tuiModeTunnels {
+			return m.openTunnelForm("", config.Tunnel{Type: "local"})
+		}
 		return m.openForm("", config.Host{})
 	case key.Matches(msg, m.keys.Edit):
+		if m.mode == tuiModeTunnels {
+			item, ok := m.selectedTunnelItem()
+			if !ok {
+				m.setError(errors.New("no tunnel selected"))
+				return m, nil
+			}
+			return m.openTunnelForm(item.name, item.tunnel)
+		}
 		item, ok := m.selectedItem()
 		if !ok {
 			m.setError(errors.New("no host selected"))
@@ -269,7 +388,12 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.openForm(item.name, item.host)
 	case key.Matches(msg, m.keys.Remove):
-		if _, ok := m.selectedItem(); !ok {
+		if m.mode == tuiModeTunnels {
+			if _, ok := m.selectedTunnelItem(); !ok {
+				m.setError(errors.New("no tunnel selected"))
+				return m, nil
+			}
+		} else if _, ok := m.selectedItem(); !ok {
 			m.setError(errors.New("no host selected"))
 			return m, nil
 		}
@@ -321,6 +445,38 @@ func (m tuiModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m tuiModel) updateTunnelForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Cancel):
+		m.screen = tuiScreenMain
+		m.inputs = nil
+		m.status = "Cancelled."
+		m.err = nil
+		return m, nil
+	case key.Matches(msg, m.keys.Quit):
+		return m, tea.Quit
+	}
+
+	switch msg.String() {
+	case "tab", "down":
+		m.focusNext()
+		return m, nil
+	case "shift+tab", "up":
+		m.focusPrev()
+		return m, nil
+	case "enter", "ctrl+s":
+		if err := m.saveTunnelForm(); err != nil {
+			m.setError(err)
+			return m, nil
+		}
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.inputs[m.focus], cmd = m.inputs[m.focus].Update(msg)
+	return m, cmd
+}
+
 func (m tuiModel) updateKeySelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
@@ -358,6 +514,29 @@ func (m tuiModel) updateKeySelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m tuiModel) updateRemove(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y", "enter":
+		if m.mode == tuiModeTunnels {
+			item, ok := m.selectedTunnelItem()
+			if !ok {
+				m.screen = tuiScreenMain
+				m.setError(errors.New("no tunnel selected"))
+				return m, nil
+			}
+			if host, ok := m.cfg.Hosts[item.tunnel.Host]; ok {
+				_, _, _ = stopTunnelByName(item.name, host)
+			}
+			delete(m.cfg.Tunnels, item.name)
+			if err := config.Save(m.path, m.cfg); err != nil {
+				m.screen = tuiScreenMain
+				m.setError(err)
+				return m, nil
+			}
+			m.reloadTunnelNames()
+			m.ensureTunnelCursor()
+			m.screen = tuiScreenMain
+			m.status = fmt.Sprintf("Removed tunnel %q", item.name)
+			m.err = nil
+			return m, nil
+		}
 		item, ok := m.selectedItem()
 		if !ok {
 			m.screen = tuiScreenMain
@@ -402,6 +581,8 @@ func (m tuiModel) View() string {
 	switch m.screen {
 	case tuiScreenForm:
 		body = m.formView()
+	case tuiScreenTunnelForm:
+		body = m.tunnelFormView()
 	case tuiScreenRemove:
 		body = m.removeView()
 	case tuiScreenPreview:
@@ -416,13 +597,25 @@ func (m tuiModel) View() string {
 	if m.status == "" {
 		footer = mutedStyle.Render("Ready.")
 	}
+	if m.screen == tuiScreenPreview {
+		footer = ""
+	}
 	helpView := mutedStyle.Render(m.help.View(m.keys))
+	if m.screen == tuiScreenPreview {
+		helpView = ""
+	}
 
 	parts := make([]string, 0, 6)
 	if banner := m.bannerView(); banner != "" {
 		parts = append(parts, banner, "")
 	}
-	parts = append(parts, body, "", footer, helpView)
+	parts = append(parts, body, "")
+	if footer != "" {
+		parts = append(parts, footer)
+	}
+	if helpView != "" {
+		parts = append(parts, helpView)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -440,7 +633,7 @@ func (m tuiModel) bannerView() string {
 		lipgloss.Bottom,
 		renderGradientBanner(),
 		"  ",
-		bannerTaglineStyle.Render("sshuttlebox "+Version) + "\n",
+		bannerTaglineStyle.Render("sshuttlebox "+Version)+"\n",
 	)
 }
 
@@ -505,45 +698,97 @@ func (m tuiModel) mainView() string {
 }
 
 func (m tuiModel) wideMainView() string {
-	leftContentWidth := maxInt(42, minInt(64, m.width/3))
-	rightContentWidth := maxInt(38, m.width-leftContentWidth-12)
+	contentWidth := m.width - 2
 	if m.width == 0 {
-		leftContentWidth = 52
-		rightContentWidth = 54
+		contentWidth = 110
 	}
+	contentWidth = maxInt(80, contentWidth)
 
-	left := panelStyle.Width(leftContentWidth).Render(m.listView(leftContentWidth))
-	detailsPanel := panelStyle.Width(rightContentWidth).Render(m.detailsView(rightContentWidth))
-	logPanel := panelStyle.Width(rightContentWidth).Render(m.connectLogView(rightContentWidth))
-	right := lipgloss.JoinVertical(lipgloss.Left, detailsPanel, logPanel)
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+	gap := 2
+	// each panel adds 2 (border) + 2 (padding) = 4 cols of chrome
+	const panelChrome = 4
+	leftOuter := (contentWidth - gap) / 2
+	rightOuter := contentWidth - gap - leftOuter
+	leftInner := maxInt(20, leftOuter-panelChrome)
+	rightInner := maxInt(20, rightOuter-panelChrome)
+	bottomInner := maxInt(40, contentWidth-panelChrome)
+
+	hostsActive := m.mode == tuiModeHosts
+
+	hostsCard := m.wrapPanel(
+		m.hostsPaneView(leftInner, hostsActive),
+		"HOSTS",
+		leftInner,
+		hostsActive,
+	)
+	tunnelsCard := m.wrapPanel(
+		m.tunnelsPaneView(rightInner, !hostsActive),
+		"TUNNELS",
+		rightInner,
+		!hostsActive,
+	)
+	lists := lipgloss.JoinHorizontal(lipgloss.Top, hostsCard, strings.Repeat(" ", gap), tunnelsCard)
+
+	detailsCard := m.wrapPanel(m.detailsView(bottomInner), "DETAILS", bottomInner, false)
+
+	parts := []string{lists}
+	if filter := m.filterRowView(); filter != "" {
+		parts = append(parts, filter)
+	}
+	parts = append(parts, detailsCard)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (m tuiModel) narrowMainView() string {
-	contentWidth := maxInt(36, m.width-8)
-	list := panelStyle.Width(contentWidth).Render(m.listView(contentWidth))
-	details := panelStyle.Width(contentWidth).Render(m.detailsView(contentWidth))
-	logPanel := panelStyle.Width(contentWidth).Render(m.connectLogView(contentWidth))
-	return lipgloss.JoinVertical(lipgloss.Left, list, details, logPanel)
+	contentWidth := maxInt(40, m.width-2)
+	const panelChrome = 4
+	innerWidth := maxInt(30, contentWidth-panelChrome)
+
+	hostsActive := m.mode == tuiModeHosts
+
+	var listCard string
+	if hostsActive {
+		listCard = m.wrapPanel(m.hostsPaneView(innerWidth, true), "HOSTS", innerWidth, true)
+	} else {
+		listCard = m.wrapPanel(m.tunnelsPaneView(innerWidth, true), "TUNNELS", innerWidth, true)
+	}
+
+	detailsCard := m.wrapPanel(m.detailsView(innerWidth), "DETAILS", innerWidth, false)
+
+	parts := []string{listCard}
+	if filter := m.filterRowView(); filter != "" {
+		parts = append(parts, filter)
+	}
+	parts = append(parts, detailsCard)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-func (m tuiModel) listView(width int) string {
-	var b strings.Builder
-	b.WriteString(sectionTitleStyle.Render("HOSTS"))
-	b.WriteString("\n")
-	if m.filter.Focused() || m.filter.Value() != "" {
-		b.WriteString(m.filter.View())
-	} else {
-		b.WriteString(mutedStyle.Render("press / to filter"))
+func (m tuiModel) wrapPanel(body, title string, innerWidth int, focused bool) string {
+	titleStyleToUse := sectionTitleStyle
+	style := panelStyle
+	if focused {
+		titleStyleToUse = focusedTitleStyle
+		style = focusedPanelStyle
 	}
-	b.WriteString("\n\n")
+	header := titleStyleToUse.Render(title)
+	content := lipgloss.JoinVertical(lipgloss.Left, header, "", body)
+	return style.Width(innerWidth).Render(content)
+}
 
+func (m tuiModel) filterRowView() string {
+	if !m.filter.Focused() && m.filter.Value() == "" {
+		return ""
+	}
+	return m.filter.View()
+}
+
+func (m tuiModel) hostsPaneView(width int, focused bool) string {
 	items := m.filteredItems()
 	if len(items) == 0 {
-		b.WriteString(mutedStyle.Render("No saved hosts. Press a to add one."))
-		return b.String()
+		return mutedStyle.Render("No saved hosts. Press a to add one.")
 	}
 
+	var b strings.Builder
 	prevSection := -1
 	for i, item := range items {
 		if item.section != prevSection {
@@ -555,10 +800,42 @@ func (m tuiModel) listView(width int) string {
 			prevSection = item.section
 		}
 		if i == m.cursor {
-			line := hostRow(item, width-2, selectedTargetStyle)
-			b.WriteString(selectedStyle.Render(fitRow("> "+line, width)))
+			if focused {
+				line := hostRow(item, width-2, selectedTargetStyle)
+				b.WriteString(selectedStyle.Render(fitRow("> "+line, width)))
+			} else {
+				line := hostRow(item, width-2, mutedStyle)
+				b.WriteString(normalRowStyle.Render(fitRow("  "+line, width)))
+			}
 		} else {
 			line := hostRow(item, width-2, mutedStyle)
+			b.WriteString(normalRowStyle.Render(fitRow("  "+line, width)))
+		}
+		if i < len(items)-1 {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+func (m tuiModel) tunnelsPaneView(width int, focused bool) string {
+	items := m.filteredTunnelItems()
+	if len(items) == 0 {
+		return mutedStyle.Render("No saved tunnels. Press a to add one.")
+	}
+
+	var b strings.Builder
+	for i, item := range items {
+		if i == m.tunnelCursor {
+			if focused {
+				line := tunnelRow(item, width-2, selectedTargetStyle)
+				b.WriteString(selectedStyle.Render(fitRow("> "+line, width)))
+			} else {
+				line := tunnelRow(item, width-2, mutedStyle)
+				b.WriteString(normalRowStyle.Render(fitRow("  "+line, width)))
+			}
+		} else {
+			line := tunnelRow(item, width-2, mutedStyle)
 			b.WriteString(normalRowStyle.Render(fitRow("  "+line, width)))
 		}
 		if i < len(items)-1 {
@@ -577,65 +854,17 @@ func sectionLabel(section int) string {
 	}
 }
 
-func (m tuiModel) connectLogView(width int) string {
-	rows := []string{sectionTitleStyle.Render("RECENT CONNECTS")}
-	events := m.hist.Recent(5)
-	if len(events) == 0 {
-		rows = append(rows, "", mutedStyle.Render("No connections yet."))
-		return strings.Join(rows, "\n")
-	}
-	rows = append(rows, "")
-	maxLine := width - 4
-	if maxLine < 12 {
-		maxLine = 12
-	}
-	now := time.Now()
-	for _, ev := range events {
-		ago := relativeTime(now, ev.At)
-		nameMax := maxLine - lipgloss.Width(ago) - 3
-		if nameMax < 4 {
-			nameMax = 4
-		}
-		name := truncate(ev.HostName, nameMax)
-		gap := maxLine - lipgloss.Width(name) - lipgloss.Width(ago)
-		if gap < 1 {
-			gap = 1
-		}
-		rows = append(rows, name+strings.Repeat(" ", gap)+mutedStyle.Render(ago))
-	}
-	return strings.Join(rows, "\n")
-}
-
-func relativeTime(now, t time.Time) string {
-	if t.IsZero() {
-		return "—"
-	}
-	d := now.Sub(t)
-	if d < 0 {
-		d = 0
-	}
-	switch {
-	case d < time.Minute:
-		return "now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	case d < 30*24*time.Hour:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	default:
-		return t.Format("2006-01-02")
-	}
-}
-
 func (m tuiModel) detailsView(width int) string {
+	if m.mode == tuiModeTunnels {
+		return m.tunnelDetailsView(width)
+	}
+
 	item, ok := m.selectedItem()
 	if !ok {
-		return sectionTitleStyle.Render("DETAILS") + "\n\n" + mutedStyle.Render("Select or add a host.")
+		return mutedStyle.Render("Select or add a host.")
 	}
 
 	rows := []string{
-		sectionTitleStyle.Render("DETAILS"),
 		titleStyle.Render(truncate(item.name, width)),
 		"",
 		labelValue("Host", item.host.Host),
@@ -644,7 +873,37 @@ func (m tuiModel) detailsView(width int) string {
 		labelValue("Identity file", optionalValue(item.host.IdentityFile)),
 		labelValue("Password", passwordStatus(item.host)),
 		"",
-		mutedStyle.Render(truncate(connectCommandString(item.host, buildSSHArgs(item.host)), width)),
+		mutedStyle.Render(wrapText(connectCommandString(item.host, buildSSHArgs(item.host)), width)),
+	}
+	return strings.Join(rows, "\n")
+}
+
+func (m tuiModel) tunnelDetailsView(width int) string {
+	item, ok := m.selectedTunnelItem()
+	if !ok {
+		return mutedStyle.Render("Select or add a tunnel.")
+	}
+
+	command := "missing SSH host"
+	if host, ok := m.cfg.Hosts[item.tunnel.Host]; ok {
+		if sshArgs, err := buildTunnelStartSSHArgs(item.name, host, item.tunnel); err == nil {
+			command = tunnelCommandString(host, sshArgs)
+		}
+	}
+	status := "stopped"
+	if entry, running, _ := tunnelstate.Get(item.name); running {
+		status = fmt.Sprintf("running pid %d", entry.PID)
+	}
+	rows := []string{
+		titleStyle.Render(truncate(item.name, width)),
+		"",
+		labelValue("Status", status),
+		labelValue("SSH host", item.tunnel.Host),
+		labelValue("Type", item.tunnel.Type),
+		labelValue("Forward", formatTunnelForward(item.tunnel)),
+		labelValue("Bind", optionalValue(item.tunnel.BindAddress)),
+		"",
+		mutedStyle.Render(wrapText(command, width)),
 	}
 	return strings.Join(rows, "\n")
 }
@@ -671,11 +930,32 @@ func (m tuiModel) formView() string {
 	}
 	helpText := "tab/down: next  shift+tab/up: previous  enter/ctrl+s: save  esc: cancel"
 	lines = append(lines, "", mutedStyle.Render(helpText))
-	return panelStyle.Width(maxInt(54, minInt(76, m.width-4))).Render(strings.Join(lines, "\n"))
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) tunnelFormView() string {
+	title := "Add tunnel"
+	if m.editTunnelOld != "" {
+		title = "Edit tunnel"
+	}
+	lines := []string{titleStyle.Render(title), ""}
+	labels := []string{"Name", "SSH host", "Type", "Bind address", "Local port", "Remote host", "Remote port"}
+	for i, input := range m.inputs {
+		label := labels[i]
+		if i == m.focus {
+			label = "> " + label
+		} else {
+			label = "  " + label
+		}
+		lines = append(lines, labelStyle.Render(label), input.View())
+	}
+	helpText := "type: local/remote/dynamic  tab/down: next  enter/ctrl+s: save  esc: cancel"
+	lines = append(lines, "", mutedStyle.Render(helpText))
+	return strings.Join(lines, "\n")
 }
 
 func (m tuiModel) keySelectView() string {
-	width := maxInt(56, minInt(84, m.width-8))
+	width := maxInt(56, minInt(84, m.width-4))
 	if m.width == 0 {
 		width = 68
 	}
@@ -685,30 +965,48 @@ func (m tuiModel) keySelectView() string {
 		lines = append(lines, mutedStyle.Render("No saved identity files."))
 	} else {
 		for i, choice := range m.keyPick {
-			line := fitRow(identityFileChoiceLabel(choice), width-6)
+			line := fitRow(identityFileChoiceLabel(choice), width-2)
 			if i == m.keyCursor {
-				lines = append(lines, selectedStyle.Render(fitRow("> "+line, width-2)))
+				lines = append(lines, selectedStyle.Render(fitRow("> "+line, width)))
 			} else {
-				lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width-2)))
+				lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
 			}
 		}
 	}
 	lines = append(lines, "", mutedStyle.Render("up/down: select  enter: use  esc: back"))
-	return panelStyle.Width(width).Render(strings.Join(lines, "\n"))
+	return strings.Join(lines, "\n")
 }
 
 func (m tuiModel) removeView() string {
+	if m.mode == tuiModeTunnels {
+		item, ok := m.selectedTunnelItem()
+		name := ""
+		if ok {
+			name = item.name
+		}
+		text := fmt.Sprintf("Remove tunnel %q?\n\nPress y/enter to remove, n/esc to cancel.", name)
+		return titleStyle.Render("Confirm remove") + "\n\n" + text
+	}
+
 	item, ok := m.selectedItem()
 	name := ""
 	if ok {
 		name = item.name
 	}
 	text := fmt.Sprintf("Remove host %q?\n\nPress y/enter to remove, n/esc to cancel.", name)
-	return panelStyle.Width(52).Render(titleStyle.Render("Confirm remove") + "\n\n" + text)
+	return titleStyle.Render("Confirm remove") + "\n\n" + text
 }
 
 func (m tuiModel) previewView() string {
-	return panelStyle.Width(maxInt(60, minInt(90, m.width-4))).Render(titleStyle.Render("SSH command") + "\n\n" + m.status + "\n\n" + mutedStyle.Render("esc/p: back  q: quit"))
+	title := "SSH command"
+	if m.mode == tuiModeTunnels {
+		title = "Tunnel command"
+	}
+	width := maxInt(32, m.width-8)
+	if m.width == 0 {
+		width = 100
+	}
+	return titleStyle.Render(title) + "\n\n" + formatCommandBlock(m.status, width) + "\n\n" + mutedStyle.Render("esc/p back  q quit")
 }
 
 func (m *tuiModel) reloadNames() {
@@ -717,6 +1015,39 @@ func (m *tuiModel) reloadNames() {
 		m.names = append(m.names, name)
 	}
 	sort.Strings(m.names)
+	m.ensureCursor()
+}
+
+func (m *tuiModel) reloadTunnelNames() {
+	m.tunnelNames = m.tunnelNames[:0]
+	for name := range m.cfg.Tunnels {
+		m.tunnelNames = append(m.tunnelNames, name)
+	}
+	sort.Strings(m.tunnelNames)
+	m.ensureTunnelCursor()
+}
+
+func (m *tuiModel) toggleMode() {
+	m.filter.Blur()
+	m.filter.SetValue("")
+	if m.mode == tuiModeHosts {
+		m.mode = tuiModeTunnels
+		m.filter.Placeholder = "filter tunnels"
+		m.status = "Showing tunnels."
+	} else {
+		m.mode = tuiModeHosts
+		m.filter.Placeholder = "filter hosts"
+		m.status = "Showing hosts."
+	}
+	m.err = nil
+	m.ensureActiveCursor()
+}
+
+func (m *tuiModel) ensureActiveCursor() {
+	if m.mode == tuiModeTunnels {
+		m.ensureTunnelCursor()
+		return
+	}
 	m.ensureCursor()
 }
 
@@ -731,6 +1062,20 @@ func (m *tuiModel) ensureCursor() {
 	}
 	if m.cursor >= len(items) {
 		m.cursor = len(items) - 1
+	}
+}
+
+func (m *tuiModel) ensureTunnelCursor() {
+	items := m.filteredTunnelItems()
+	if len(items) == 0 {
+		m.tunnelCursor = 0
+		return
+	}
+	if m.tunnelCursor < 0 {
+		m.tunnelCursor = 0
+	}
+	if m.tunnelCursor >= len(items) {
+		m.tunnelCursor = len(items) - 1
 	}
 }
 
@@ -772,6 +1117,27 @@ func (m tuiModel) filteredItems() []tuiHostItem {
 	return items
 }
 
+func (m tuiModel) filteredTunnelItems() []tuiTunnelItem {
+	query := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	matches := func(name string, tunnel config.Tunnel) bool {
+		if query == "" {
+			return true
+		}
+		haystack := strings.ToLower(strings.Join([]string{name, tunnel.Host, tunnel.Type, tunnel.BindAddress, tunnel.RemoteHost, formatTunnelForward(tunnel)}, " "))
+		return strings.Contains(haystack, query)
+	}
+
+	items := make([]tuiTunnelItem, 0, len(m.tunnelNames))
+	for _, name := range m.tunnelNames {
+		tunnel := m.cfg.Tunnels[name]
+		if !matches(name, tunnel) {
+			continue
+		}
+		items = append(items, tuiTunnelItem{name: name, tunnel: tunnel})
+	}
+	return items
+}
+
 func (m tuiModel) selectedItem() (tuiHostItem, bool) {
 	items := m.filteredItems()
 	if len(items) == 0 || m.cursor < 0 || m.cursor >= len(items) {
@@ -780,9 +1146,21 @@ func (m tuiModel) selectedItem() (tuiHostItem, bool) {
 	return items[m.cursor], true
 }
 
+func (m tuiModel) selectedTunnelItem() (tuiTunnelItem, bool) {
+	items := m.filteredTunnelItems()
+	if len(items) == 0 || m.tunnelCursor < 0 || m.tunnelCursor >= len(items) {
+		return tuiTunnelItem{}, false
+	}
+	return items[m.tunnelCursor], true
+}
+
 func (m tuiModel) focusFilter() (tea.Model, tea.Cmd) {
 	cmd := m.filter.Focus()
-	m.status = "Filtering hosts."
+	if m.mode == tuiModeTunnels {
+		m.status = "Filtering tunnels."
+	} else {
+		m.status = "Filtering hosts."
+	}
 	m.err = nil
 	return m, cmd
 }
@@ -810,9 +1188,42 @@ func (m tuiModel) openForm(name string, host config.Host) (tea.Model, tea.Cmd) {
 	m.inputs = inputs
 	m.focus = 0
 	m.editOld = name
+	m.editTunnelOld = ""
 	m.keyPick = nil
 	m.keyCursor = 0
 	m.screen = tuiScreenForm
+	m.status = ""
+	m.err = nil
+	return m, cmd
+}
+
+func (m tuiModel) openTunnelForm(name string, tunnel config.Tunnel) (tea.Model, tea.Cmd) {
+	inputs := make([]textinput.Model, tuiTunnelFieldCount)
+	placeholders := []string{"db", "prod", "local", "127.0.0.1", "5432", "127.0.0.1", "5432"}
+	values := []string{name, tunnel.Host, tunnel.Type, tunnel.BindAddress, "", tunnel.RemoteHost, ""}
+	if tunnel.Type == "" {
+		values[tuiTunnelFieldType] = "local"
+	}
+	if tunnel.LocalPort != 0 {
+		values[tuiTunnelFieldLocalPort] = strconv.Itoa(tunnel.LocalPort)
+	}
+	if tunnel.RemotePort != 0 {
+		values[tuiTunnelFieldRemotePort] = strconv.Itoa(tunnel.RemotePort)
+	}
+
+	for i := range inputs {
+		inputs[i] = textinput.New()
+		inputs[i].Placeholder = placeholders[i]
+		inputs[i].Width = maxInt(18, minInt(52, m.width-24))
+		inputs[i].SetValue(values[i])
+	}
+	cmd := inputs[0].Focus()
+
+	m.inputs = inputs
+	m.focus = 0
+	m.editOld = ""
+	m.editTunnelOld = name
+	m.screen = tuiScreenTunnelForm
 	m.status = ""
 	m.err = nil
 	return m, cmd
@@ -916,6 +1327,113 @@ func (m *tuiModel) saveForm() error {
 	return nil
 }
 
+func (m *tuiModel) saveTunnelForm() error {
+	name := strings.TrimSpace(m.inputs[tuiTunnelFieldName].Value())
+	tunnel := config.Tunnel{
+		Host:        strings.TrimSpace(m.inputs[tuiTunnelFieldHost].Value()),
+		Type:        strings.ToLower(strings.TrimSpace(m.inputs[tuiTunnelFieldType].Value())),
+		BindAddress: strings.TrimSpace(m.inputs[tuiTunnelFieldBind].Value()),
+		RemoteHost:  strings.TrimSpace(m.inputs[tuiTunnelFieldRemoteHost].Value()),
+	}
+	if tunnel.Type == "" {
+		tunnel.Type = "local"
+	}
+	if name == "" {
+		return errors.New("tunnel name cannot be empty")
+	}
+	localPortText := strings.TrimSpace(m.inputs[tuiTunnelFieldLocalPort].Value())
+	if localPortText != "" {
+		port, err := strconv.Atoi(localPortText)
+		if err != nil {
+			return fmt.Errorf("invalid local port %q", localPortText)
+		}
+		tunnel.LocalPort = port
+	}
+	remotePortText := strings.TrimSpace(m.inputs[tuiTunnelFieldRemotePort].Value())
+	if remotePortText != "" {
+		port, err := strconv.Atoi(remotePortText)
+		if err != nil {
+			return fmt.Errorf("invalid remote port %q", remotePortText)
+		}
+		tunnel.RemotePort = port
+	}
+	if tunnel.Type == "dynamic" {
+		tunnel.RemoteHost = ""
+		tunnel.RemotePort = 0
+	}
+	if err := validateTunnel(tunnel, m.cfg.Hosts); err != nil {
+		return err
+	}
+	if m.editTunnelOld == "" {
+		if _, exists := m.cfg.Tunnels[name]; exists {
+			return fmt.Errorf("tunnel %q already exists", name)
+		}
+	} else if name != m.editTunnelOld {
+		if _, exists := m.cfg.Tunnels[name]; exists {
+			return fmt.Errorf("tunnel %q already exists", name)
+		}
+		delete(m.cfg.Tunnels, m.editTunnelOld)
+	}
+
+	m.cfg.Tunnels[name] = tunnel
+	if err := config.Save(m.path, m.cfg); err != nil {
+		return err
+	}
+	m.reloadTunnelNames()
+	for i, existing := range m.filteredTunnelItems() {
+		if existing.name == name {
+			m.tunnelCursor = i
+			break
+		}
+	}
+	m.screen = tuiScreenMain
+	m.inputs = nil
+	action := "Added"
+	if m.editTunnelOld != "" {
+		action = "Updated"
+	}
+	m.status = fmt.Sprintf("%s tunnel %q", action, name)
+	m.err = nil
+	return nil
+}
+
+func (m *tuiModel) toggleTunnel(name string, tunnel config.Tunnel) error {
+	if entry, running, err := tunnelstate.Get(name); err != nil {
+		return err
+	} else if running {
+		host, ok := m.cfg.Hosts[tunnel.Host]
+		if !ok {
+			return fmt.Errorf("host %q for tunnel %q not found", tunnel.Host, name)
+		}
+		stopped, _, err := stopTunnelByName(name, host)
+		if err != nil {
+			return err
+		}
+		if stopped {
+			m.status = fmt.Sprintf("Stopped tunnel %q with pid %d", name, entry.PID)
+		} else {
+			m.status = fmt.Sprintf("Tunnel %q is not running", name)
+		}
+		m.err = nil
+		return nil
+	}
+
+	host, ok := m.cfg.Hosts[tunnel.Host]
+	if !ok {
+		return fmt.Errorf("host %q for tunnel %q not found", tunnel.Host, name)
+	}
+	if err := validateTunnel(tunnel, m.cfg.Hosts); err != nil {
+		return err
+	}
+	pid, err := startTunnelProcess(name, host, tunnel, false)
+	if err != nil {
+		return err
+	}
+	m.status = fmt.Sprintf("Started tunnel %q in background with pid %d", name, pid)
+	m.err = nil
+	return nil
+}
+
 func (m *tuiModel) setError(err error) {
 	m.err = err
 	m.status = ""
@@ -986,6 +1504,31 @@ func hostRow(item tuiHostItem, width int, targetStyle lipgloss.Style) string {
 	return truncate(name+"  "+target, width)
 }
 
+func tunnelRow(item tuiTunnelItem, width int, targetStyle lipgloss.Style) string {
+	if width <= 0 {
+		return ""
+	}
+	name := item.name
+	status := "stopped"
+	if _, running, _ := tunnelstate.Get(item.name); running {
+		status = "running"
+	}
+	target := status + "  " + formatTunnelForward(item.tunnel)
+	full := name + "  " + targetStyle.Render(target)
+	if lipgloss.Width(name)+2+lipgloss.Width(target) <= width {
+		return full
+	}
+	minTargetWidth := minInt(24, width/2)
+	if width >= 34 {
+		targetWidth := maxInt(minTargetWidth, width-lipgloss.Width(name)-2)
+		nameWidth := width - targetWidth - 2
+		if nameWidth >= 10 {
+			return truncate(name, nameWidth) + "  " + targetStyle.Render(truncate(target, targetWidth))
+		}
+	}
+	return truncate(name+"  "+target, width)
+}
+
 func fitRow(value string, width int) string {
 	value = truncate(value, width)
 	padding := width - lipgloss.Width(value)
@@ -1003,6 +1546,89 @@ func truncate(value string, width int) string {
 		return value
 	}
 	return value[:width-3] + "..."
+}
+
+func wrapText(value string, width int) string {
+	if width <= 0 || lipgloss.Width(value) <= width {
+		return value
+	}
+
+	words := strings.Fields(value)
+	if len(words) == 0 {
+		return wrapLongToken(value, width)
+	}
+
+	var lines []string
+	current := ""
+	for _, word := range words {
+		for lipgloss.Width(word) > width {
+			piece, rest := splitByWidth(word, width)
+			if current != "" {
+				lines = append(lines, current)
+				current = ""
+			}
+			lines = append(lines, piece)
+			word = rest
+		}
+		if current == "" {
+			current = word
+			continue
+		}
+		if lipgloss.Width(current)+1+lipgloss.Width(word) <= width {
+			current += " " + word
+			continue
+		}
+		lines = append(lines, current)
+		current = word
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatCommandBlock(command string, width int) string {
+	lines := strings.Split(wrapText(command, width), "\n")
+	if len(lines) <= 1 {
+		return command
+	}
+	for i := 1; i < len(lines); i++ {
+		lines[i] = "  " + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func wrapLongToken(value string, width int) string {
+	var lines []string
+	for lipgloss.Width(value) > width {
+		piece, rest := splitByWidth(value, width)
+		lines = append(lines, piece)
+		value = rest
+	}
+	if value != "" {
+		lines = append(lines, value)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func splitByWidth(value string, width int) (string, string) {
+	if width <= 0 {
+		return "", value
+	}
+	lastGood := 0
+	for i := range value {
+		if i == 0 {
+			continue
+		}
+		if lipgloss.Width(value[:i]) > width {
+			if lastGood == 0 {
+				return value[:i], value[i:]
+			}
+			return value[:lastGood], value[lastGood:]
+		}
+		lastGood = i
+	}
+	return value, ""
 }
 
 func minInt(a, b int) int {
@@ -1035,10 +1661,17 @@ var (
 	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("238")).
-			Padding(1, 2)
+			Padding(0, 1)
+	focusedPanelStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("99")).
+				Padding(0, 1)
 	sectionTitleStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("69"))
+	focusedTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("213"))
 	subSectionStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("105")).
 			Bold(true)

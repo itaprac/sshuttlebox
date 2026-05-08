@@ -15,6 +15,7 @@ shbx connect prod
 - Add hosts interactively or with flags
 - List, show, edit, rename, and remove saved hosts
 - Connect through the system `ssh` command
+- Save and quickly start SSH local, remote, and SOCKS tunnels
 - Optional terminal UI with search and full host management
 - Preview generated SSH commands with `--dry-run`
 - Optional password-based automatic login
@@ -64,6 +65,23 @@ Connect to it:
 shbx connect prod
 ```
 
+Add a local port-forwarding tunnel through the saved host:
+
+```bash
+shbx tunnel add
+shbx tunnel add db --host prod --local-port 5432 --remote-host 127.0.0.1 --remote-port 5432
+shbx tunnel start db
+shbx tunnel list
+shbx tunnel stop db
+```
+
+Add a SOCKS tunnel:
+
+```bash
+shbx tunnel add socks --host prod --dynamic-port 1080
+shbx tunnel start socks
+```
+
 Preview the command without connecting:
 
 ```bash
@@ -83,6 +101,12 @@ shbx add [name] [--host host] [--user user] [--password password] [--port port] 
 shbx list
 shbx show <name>
 shbx connect <name> [--dry-run|--print]
+shbx tunnel add [name] --host <saved-host> (--local-port port --remote-host host --remote-port port | --dynamic-port port) [--type local|remote|dynamic] [--bind address]
+shbx tunnel list
+shbx tunnel show <name>
+shbx tunnel start <name> [--dry-run|--print]
+shbx tunnel stop <name>
+shbx tunnel remove <name> [--yes|--force]
 shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]
 shbx remove <name> [--yes|--force]
 shbx ui
@@ -92,12 +116,17 @@ Run `shbx help` for the full command reference.
 
 ## Terminal UI
 
-`shbx ui` opens an optional keyboard-first TUI for managing saved hosts. It
-supports filtering, adding, editing, removing, dry-run command preview, and
-connecting to the selected host. When you connect, the UI exits first and then
-starts the normal system `ssh` session. In the add/edit form, press `ctrl+k` by
-the identity-file field to choose a private key path already saved on another
-host.
+`shbx ui` opens an optional keyboard-first TUI for managing saved hosts and
+tunnels. It supports filtering, adding, editing, removing, dry-run command
+preview, and connecting to the selected host or starting/stopping the selected
+tunnel. Press `tab` to switch between hosts and tunnels. Host connections exit
+the UI first and then start the normal system `ssh` session. Tunnels run in the
+background and remain visible as running until you stop them. Tunnel start uses
+OpenSSH background mode, so if SSH needs a password you can type it normally
+before the tunnel detaches. If the saved host has a password in the config,
+sshuttlebox can pass it through automatically. In the host add/edit form, press
+`ctrl+k` by the identity-file field to choose a private key path already saved
+on another host.
 
 ## Shell Completion
 

@@ -14,8 +14,9 @@ const (
 )
 
 type Config struct {
-	Version int             `json:"version"`
-	Hosts   map[string]Host `json:"hosts"`
+	Version int               `json:"version"`
+	Hosts   map[string]Host   `json:"hosts"`
+	Tunnels map[string]Tunnel `json:"tunnels"`
 }
 
 type Host struct {
@@ -26,10 +27,20 @@ type Host struct {
 	IdentityFile string `json:"identityFile,omitempty"`
 }
 
+type Tunnel struct {
+	Host        string `json:"host"`
+	Type        string `json:"type"`
+	BindAddress string `json:"bindAddress,omitempty"`
+	LocalPort   int    `json:"localPort,omitempty"`
+	RemoteHost  string `json:"remoteHost,omitempty"`
+	RemotePort  int    `json:"remotePort,omitempty"`
+}
+
 func Default() Config {
 	return Config{
 		Version: 1,
 		Hosts:   map[string]Host{},
+		Tunnels: map[string]Tunnel{},
 	}
 }
 
@@ -98,6 +109,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Hosts == nil {
 		cfg.Hosts = map[string]Host{}
+	}
+	if cfg.Tunnels == nil {
+		cfg.Tunnels = map[string]Tunnel{}
 	}
 
 	return cfg, nil

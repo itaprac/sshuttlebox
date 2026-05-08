@@ -163,6 +163,56 @@ func TestTUIConnectActionQuitsWithSelectedHost(t *testing.T) {
 	}
 }
 
+func TestTUITunnelModeAddsEditsRemovesAndStartsTunnel(t *testing.T) {
+	withTempHome(t)
+	path, _, err := config.Init()
+	if err != nil {
+		t.Fatalf("init config: %v", err)
+	}
+	cfg := config.Default()
+	cfg.Hosts["prod"] = config.Host{Host: "prod.example", User: "deploy"}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	t.Setenv("SHBX_SSH_BIN", fakeSSHBinary(t))
+
+	model := newTUIModelWithState(path, cfg, nil)
+	model.toggleMode()
+	if model.mode != tuiModeTunnels {
+		t.Fatalf("mode = %v, want tunnels", model.mode)
+	}
+
+	model = openTUITunnelForm(t, model, "", config.Tunnel{Type: "local"})
+	setTUITunnelFormValues(&model, "db", "prod", "local", "", "5432", "127.0.0.1", "5432")
+	if err := model.saveTunnelForm(); err != nil {
+		t.Fatalf("save add tunnel form: %v", err)
+	}
+	assertTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+
+	model = openTUITunnelForm(t, model, "db", model.cfg.Tunnels["db"])
+	setTUITunnelFormValues(&model, "socks", "prod", "dynamic", "127.0.0.1", "1080", "ignored", "9999")
+	if err := model.saveTunnelForm(); err != nil {
+		t.Fatalf("save edit tunnel form: %v", err)
+	}
+	assertTunnelMissing(t, "db")
+	assertTunnel(t, "socks", config.Tunnel{Host: "prod", Type: "dynamic", BindAddress: "127.0.0.1", LocalPort: 1080})
+
+	updated, cmd := model.updateMain(keyMsg(tea.KeyEnter))
+	model = updated.(tuiModel)
+	if model.tunnelName != "socks" {
+		t.Fatalf("tunnelName = %q, want socks", model.tunnelName)
+	}
+	if cmd == nil {
+		t.Fatalf("expected quit command")
+	}
+
+	model.tunnelName = ""
+	model.screen = tuiScreenRemove
+	updated, _ = model.updateRemove(keyMsg(tea.KeyEnter))
+	model = updated.(tuiModel)
+	assertTunnelMissing(t, "socks")
+}
+
 func TestTUISelectedRowStaysInsideListWidth(t *testing.T) {
 	item := tuiHostItem{
 		name: "starlink-be-dev",
@@ -177,6 +227,62 @@ func TestTUISelectedRowStaysInsideListWidth(t *testing.T) {
 	rendered := selectedStyle.Render(fitRow("> "+row, width))
 	if got := lipgloss.Width(rendered); got > width {
 		t.Fatalf("selected row width = %d, want <= %d; row %q", got, width, rendered)
+	}
+}
+
+func TestTUIUnfocusedPaneDoesNotShowCursorMarker(t *testing.T) {
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"mini": {Host: "100.124.218.15", User: "srv"},
+		},
+		Tunnels: map[string]config.Tunnel{
+			"db": {Host: "mini", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432},
+		},
+	}, nil)
+
+	hosts := model.hostsPaneView(52, false)
+	if strings.Contains(hosts, "> mini") {
+		t.Fatalf("unfocused hosts pane still shows cursor marker: %q", hosts)
+	}
+
+	tunnels := model.tunnelsPaneView(52, false)
+	if strings.Contains(tunnels, "> db") {
+		t.Fatalf("unfocused tunnels pane still shows cursor marker: %q", tunnels)
+	}
+}
+
+func TestWrapTextKeepsLongCommandVisible(t *testing.T) {
+	command := "ssh -p 22 -M -S /very/long/control/path/that/would/otherwise/be/truncated.sock -f -N -T deploy@example.com"
+	wrapped := wrapText(command, 32)
+	if strings.Contains(wrapped, "...") {
+		t.Fatalf("wrapped command should not be truncated: %q", wrapped)
+	}
+	if !strings.Contains(wrapped, "deploy@example.com") || !strings.Contains(wrapped, "truncated.sock") {
+		t.Fatalf("wrapped command lost content: %q", wrapped)
+	}
+	for _, line := range strings.Split(wrapped, "\n") {
+		if lipgloss.Width(line) > 32 {
+			t.Fatalf("line width = %d, want <= 32 for %q in %q", lipgloss.Width(line), line, wrapped)
+		}
+	}
+}
+
+func TestTUIPreviewDoesNotRenderGlobalHelpOrDuplicateQuit(t *testing.T) {
+	model := newTUIModelWithState("", config.Default(), nil)
+	model.screen = tuiScreenPreview
+	model.status = "ssh -p 22 -M -S /very/long/control/path.sock -f -N -T deploy@example.com"
+	model.width = 48
+
+	view := model.View()
+	if strings.Contains(view, "enter/c connect") {
+		t.Fatalf("preview should not render global help: %q", view)
+	}
+	if got := strings.Count(view, "quit"); got != 1 {
+		t.Fatalf("preview should render one quit help, got %d occurrences in %q", got, view)
+	}
+	if !strings.Contains(view, "\n  ") {
+		t.Fatalf("wrapped preview command should indent continuation lines: %q", view)
 	}
 }
 
@@ -208,6 +314,20 @@ func openTUIForm(t *testing.T, model tuiModel, name string, host config.Host) tu
 
 func setTUIFormValues(model *tuiModel, name, host, user, password, port, identityFile string) {
 	values := []string{name, host, user, password, port, identityFile}
+	for i, value := range values {
+		model.inputs[i].SetValue(value)
+	}
+}
+
+func openTUITunnelForm(t *testing.T, model tuiModel, name string, tunnel config.Tunnel) tuiModel {
+	t.Helper()
+
+	updated, _ := model.openTunnelForm(name, tunnel)
+	return updated.(tuiModel)
+}
+
+func setTUITunnelFormValues(model *tuiModel, name, host, tunnelType, bind, localPort, remoteHost, remotePort string) {
+	values := []string{name, host, tunnelType, bind, localPort, remoteHost, remotePort}
 	for i, value := range values {
 		model.inputs[i].SetValue(value)
 	}

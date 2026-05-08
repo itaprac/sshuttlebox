@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/itaprac/sshuttlebox/internal/config"
 	"github.com/itaprac/sshuttlebox/internal/history"
+	"github.com/itaprac/sshuttlebox/internal/tunnelstate"
 	"golang.org/x/term"
 )
 
@@ -59,6 +61,8 @@ func (a App) Run(args []string) error {
 		return a.runShow(args[1:])
 	case "connect":
 		return a.runConnect(args[1:])
+	case "tunnel":
+		return a.runTunnel(args[1:])
 	case "edit":
 		return a.runEdit(args[1:])
 	case "remove":
@@ -413,12 +417,392 @@ func (a App) runConnect(args []string) error {
 		return runSSHWithPassword(host.Password, sshArgs)
 	}
 
-	cmd := exec.Command("ssh", sshArgs...)
+	cmd := exec.Command(sshBinary(), sshArgs...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
+}
+
+func (a App) runTunnel(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: shbx tunnel <add|list|show|start|stop|remove>")
+	}
+
+	switch args[0] {
+	case "add":
+		return a.runTunnelAdd(args[1:])
+	case "list":
+		return a.runTunnelList(args[1:])
+	case "show":
+		return a.runTunnelShow(args[1:])
+	case "start":
+		return a.runTunnelStart(args[1:])
+	case "stop":
+		return a.runTunnelStop(args[1:])
+	case "remove":
+		return a.runTunnelRemove(args[1:])
+	default:
+		return fmt.Errorf("unknown tunnel command %q; available: add, list, show, start, stop, remove", args[0])
+	}
+}
+
+func (a App) runTunnelAdd(args []string) error {
+	const usage = "usage: shbx tunnel add [name] --host <saved-host> (--local-port port --remote-host host --remote-port port | --dynamic-port port) [--type local|remote|dynamic] [--bind address]"
+
+	name := ""
+	flagArgs := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		name = strings.TrimSpace(args[0])
+		flagArgs = args[1:]
+	}
+
+	fs := flag.NewFlagSet("tunnel add", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	hostFlag := fs.String("host", "", "Saved SSH host to use")
+	typeFlag := fs.String("type", "", "Tunnel type: local, remote, or dynamic")
+	bindFlag := fs.String("bind", "", "Bind address")
+	localPortFlag := fs.Int("local-port", 0, "Local port for local/dynamic forwarding")
+	dynamicPortFlag := fs.Int("dynamic-port", 0, "Local SOCKS port for dynamic forwarding")
+	remoteHostFlag := fs.String("remote-host", "", "Remote target host")
+	remotePortFlag := fs.Int("remote-port", 0, "Remote target/listen port")
+
+	if err := fs.Parse(flagArgs); err != nil {
+		return errors.New(usage)
+	}
+	if fs.NArg() != 0 {
+		return errors.New(usage)
+	}
+
+	path, err := config.Path()
+	if err != nil {
+		return err
+	}
+	if _, _, err := config.Init(); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	interactive := isTerminalInput(a.in)
+	var reader *bufio.Reader
+	if interactive {
+		reader = bufio.NewReader(a.in)
+	}
+
+	if name == "" {
+		if !interactive {
+			return errors.New("missing tunnel name; pass it as an argument")
+		}
+		name, err = prompt(reader, a.out, "Name")
+		if err != nil {
+			return err
+		}
+		name = strings.TrimSpace(name)
+	}
+	if name == "" {
+		return errors.New("tunnel name cannot be empty")
+	}
+	if _, exists := cfg.Tunnels[name]; exists {
+		return fmt.Errorf("tunnel %q already exists; remove it first or choose a different name", name)
+	}
+
+	tunnel := config.Tunnel{
+		Host:        strings.TrimSpace(*hostFlag),
+		Type:        strings.ToLower(strings.TrimSpace(*typeFlag)),
+		BindAddress: strings.TrimSpace(*bindFlag),
+		LocalPort:   *localPortFlag,
+		RemoteHost:  strings.TrimSpace(*remoteHostFlag),
+		RemotePort:  *remotePortFlag,
+	}
+	if *dynamicPortFlag != 0 {
+		if flagWasSet(fs, "local-port") {
+			return errors.New("--dynamic-port cannot be used with --local-port")
+		}
+		tunnel.Type = "dynamic"
+		tunnel.LocalPort = *dynamicPortFlag
+	}
+	if tunnel.Type == "" {
+		tunnel.Type = "local"
+	}
+	if interactive && fs.NFlag() == 0 {
+		tunnel, err = promptTunnel(reader, a.out, cfg.Hosts, tunnel)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := validateTunnel(tunnel, cfg.Hosts); err != nil {
+		return err
+	}
+
+	cfg.Tunnels[name] = tunnel
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(a.out, "Added tunnel %q\n", name)
+	return nil
+}
+
+func (a App) runTunnelList(args []string) error {
+	if len(args) != 0 {
+		return errors.New("usage: shbx tunnel list")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	names := make([]string, 0, len(cfg.Tunnels))
+	for name := range cfg.Tunnels {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	if len(names) == 0 {
+		fmt.Fprintln(a.out, "No saved tunnels.")
+		return nil
+	}
+
+	state, err := tunnelstate.Prune()
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(a.out, "%-16s %-9s %-12s %-16s %s\n", "NAME", "STATUS", "TYPE", "SSH HOST", "FORWARD")
+	for _, name := range names {
+		tunnel := cfg.Tunnels[name]
+		fmt.Fprintf(a.out, "%-16s %-9s %-12s %-16s %s\n", name, formatTunnelStatus(state, name), tunnel.Type, tunnel.Host, formatTunnelForward(tunnel))
+	}
+	return nil
+}
+
+func (a App) runTunnelShow(args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: shbx tunnel show <name>")
+	}
+
+	name := strings.TrimSpace(args[0])
+	if name == "" {
+		return errors.New("tunnel name cannot be empty")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	tunnel, ok := cfg.Tunnels[name]
+	if !ok {
+		return fmt.Errorf("tunnel %q not found", name)
+	}
+	host, ok := cfg.Hosts[tunnel.Host]
+	if !ok {
+		return fmt.Errorf("host %q for tunnel %q not found", tunnel.Host, name)
+	}
+	if err := validateTunnel(tunnel, cfg.Hosts); err != nil {
+		return err
+	}
+	entry, running, err := tunnelstate.Get(name)
+	if err != nil {
+		return err
+	}
+
+	sshArgs, err := buildTunnelStartSSHArgs(name, host, tunnel)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "Name: %s\n", name)
+	if running {
+		fmt.Fprintf(a.out, "Status: running pid %d since %s\n", entry.PID, entry.StartedAt.Local().Format("2006-01-02 15:04:05"))
+	} else {
+		fmt.Fprintln(a.out, "Status: stopped")
+	}
+	fmt.Fprintf(a.out, "Host: %s\n", tunnel.Host)
+	fmt.Fprintf(a.out, "Type: %s\n", tunnel.Type)
+	fmt.Fprintf(a.out, "Forward: %s\n", formatTunnelForward(tunnel))
+	fmt.Fprintf(a.out, "Command: %s\n", tunnelCommandString(host, sshArgs))
+	return nil
+}
+
+func (a App) runTunnelStart(args []string) error {
+	const usage = "usage: shbx tunnel start <name> [--dry-run|--print]"
+
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New(usage)
+	}
+
+	fs := flag.NewFlagSet("tunnel start", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	dryRunFlag := fs.Bool("dry-run", false, "Print SSH tunnel command without running it")
+	printFlag := fs.Bool("print", false, "Print SSH tunnel command without running it")
+	if err := fs.Parse(args[1:]); err != nil {
+		return errors.New(usage)
+	}
+	if fs.NArg() != 0 {
+		return errors.New(usage)
+	}
+
+	name := strings.TrimSpace(args[0])
+	if name == "" {
+		return errors.New("tunnel name cannot be empty")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	tunnel, ok := cfg.Tunnels[name]
+	if !ok {
+		return fmt.Errorf("tunnel %q not found", name)
+	}
+	host, ok := cfg.Hosts[tunnel.Host]
+	if !ok {
+		return fmt.Errorf("host %q for tunnel %q not found", tunnel.Host, name)
+	}
+	if err := validateTunnel(tunnel, cfg.Hosts); err != nil {
+		return err
+	}
+
+	sshArgs, err := buildTunnelStartSSHArgs(name, host, tunnel)
+	if err != nil {
+		return err
+	}
+	if *dryRunFlag || *printFlag {
+		fmt.Fprintln(a.out, tunnelCommandString(host, sshArgs))
+		return nil
+	}
+	if entry, running, err := tunnelstate.Get(name); err != nil {
+		return err
+	} else if running {
+		fmt.Fprintf(a.out, "Tunnel %q already running with pid %d\n", name, entry.PID)
+		return nil
+	}
+
+	pid, err := startTunnelProcess(name, host, tunnel, true)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "Started tunnel %q in background with pid %d\n", name, pid)
+	return nil
+}
+
+func (a App) runTunnelStop(args []string) error {
+	const usage = "usage: shbx tunnel stop <name>"
+
+	if len(args) != 1 {
+		return errors.New(usage)
+	}
+
+	name := strings.TrimSpace(args[0])
+	if name == "" {
+		return errors.New("tunnel name cannot be empty")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	tunnel, ok := cfg.Tunnels[name]
+	if !ok {
+		return fmt.Errorf("tunnel %q not found", name)
+	}
+	host, ok := cfg.Hosts[tunnel.Host]
+	if !ok {
+		return fmt.Errorf("host %q for tunnel %q not found", tunnel.Host, name)
+	}
+
+	stopped, entry, err := stopTunnelByName(name, host)
+	if err != nil {
+		return err
+	}
+	if !stopped {
+		fmt.Fprintf(a.out, "Tunnel %q is not running\n", name)
+		return nil
+	}
+	fmt.Fprintf(a.out, "Stopped tunnel %q with pid %d\n", name, entry.PID)
+	return nil
+}
+
+func (a App) runTunnelRemove(args []string) error {
+	const usage = "usage: shbx tunnel remove <name> [--yes|--force]"
+
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New(usage)
+	}
+
+	fs := flag.NewFlagSet("tunnel remove", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	yesFlag := fs.Bool("yes", false, "Skip confirmation")
+	forceFlag := fs.Bool("force", false, "Skip confirmation")
+	if err := fs.Parse(args[1:]); err != nil {
+		return errors.New(usage)
+	}
+	if fs.NArg() != 0 {
+		return errors.New(usage)
+	}
+
+	name := strings.TrimSpace(args[0])
+	if name == "" {
+		return errors.New("tunnel name cannot be empty")
+	}
+
+	path, err := config.Path()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	tunnel, ok := cfg.Tunnels[name]
+	if !ok {
+		return fmt.Errorf("tunnel %q not found", name)
+	}
+	if entry, running, err := tunnelstate.Get(name); err != nil {
+		return err
+	} else if running && !*yesFlag && !*forceFlag {
+		return fmt.Errorf("tunnel %q is running with pid %d; stop it first or pass --force", name, entry.PID)
+	}
+
+	if !*yesFlag && !*forceFlag {
+		if !isTerminalInput(a.in) {
+			return fmt.Errorf("confirmation required; pass --yes to remove tunnel %q", name)
+		}
+
+		reader := bufio.NewReader(a.in)
+		remove, err := confirm(reader, a.out, fmt.Sprintf("Remove tunnel %q?", name))
+		if err != nil {
+			return err
+		}
+		if !remove {
+			fmt.Fprintln(a.out, "Cancelled.")
+			return nil
+		}
+	}
+
+	if *forceFlag {
+		if host, ok := cfg.Hosts[tunnel.Host]; ok {
+			_, _, _ = stopTunnelByName(name, host)
+		} else {
+			_, _, _ = tunnelstate.Stop(name)
+		}
+	}
+	delete(cfg.Tunnels, name)
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(a.out, "Removed tunnel %q\n", name)
+	return nil
 }
 
 func (a App) runEdit(args []string) error {
@@ -769,6 +1153,11 @@ func (a App) runComplete(args []string) error {
 		for _, name := range completeHostNames(prefix) {
 			fmt.Fprintln(a.out, name)
 		}
+	case "tunnels":
+		prefix := completePrefix(args[1:])
+		for _, name := range completeTunnelNames(prefix) {
+			fmt.Fprintln(a.out, name)
+		}
 	}
 	return nil
 }
@@ -785,6 +1174,7 @@ Commands:
   list             List saved hosts with SSH targets
   show <name>      Show saved host details
   connect <name>   Connect to saved host over SSH
+  tunnel           Add, list, show, start, stop, or remove SSH tunnels
   edit <name>      Edit saved host
   remove <name>    Remove saved host
   ui               Open the interactive terminal UI (default)
@@ -817,6 +1207,21 @@ Edit options:
 Connect options:
   --dry-run                    Print SSH command without connecting
   --print                      Alias for --dry-run
+
+Tunnel examples:
+  shbx tunnel add               Add tunnel interactively
+  shbx tunnel add db --host prod --local-port 5432 --remote-host 127.0.0.1 --remote-port 5432
+  shbx tunnel add socks --host prod --dynamic-port 1080
+  shbx tunnel list              Show saved tunnels and running status
+  shbx tunnel show db           Show tunnel details and start command
+  shbx tunnel start db
+  shbx tunnel stop db
+  shbx tunnel start db --dry-run
+
+Tunnel behavior:
+  start                         Starts SSH in the background and stores its PID
+  stop                          Stops the running SSH tunnel
+  password prompts              If SSH asks for a password, type it normally
 
 Remove options:
   --yes                        Remove without confirmation
@@ -1059,7 +1464,7 @@ func completePrefix(args []string) string {
 }
 
 func completeCommandNames(prefix string) []string {
-	commands := []string{"add", "list", "show", "connect", "edit", "remove", "ui", "completion", "config", "version", "help"}
+	commands := []string{"add", "list", "show", "connect", "tunnel", "edit", "remove", "ui", "completion", "config", "version", "help"}
 	return filterSortedPrefix(commands, prefix)
 }
 
@@ -1071,6 +1476,19 @@ func completeHostNames(prefix string) []string {
 
 	names := make([]string, 0, len(cfg.Hosts))
 	for name := range cfg.Hosts {
+		names = append(names, name)
+	}
+	return filterSortedPrefix(names, prefix)
+}
+
+func completeTunnelNames(prefix string) []string {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+
+	names := make([]string, 0, len(cfg.Tunnels))
+	for name := range cfg.Tunnels {
 		names = append(names, name)
 	}
 	return filterSortedPrefix(names, prefix)
@@ -1106,6 +1524,16 @@ const bashCompletionScript = `_shbx_completion()
                 return 0
             fi
             ;;
+        tunnel)
+            if [[ ${COMP_CWORD} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "add list show start stop remove" -- "$cur") )
+                return 0
+            fi
+            if [[ ${COMP_CWORD} -eq 3 && ( "${COMP_WORDS[2]}" = "show" || "${COMP_WORDS[2]}" = "start" || "${COMP_WORDS[2]}" = "stop" || "${COMP_WORDS[2]}" = "remove" ) ]]; then
+                COMPREPLY=( $(compgen -W "$(shbx __complete tunnels -- "$cur")" -- "$cur") )
+                return 0
+            fi
+            ;;
         completion)
             if [[ ${COMP_CWORD} -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") )
@@ -1120,7 +1548,7 @@ complete -F _shbx_completion shbx
 const zshCompletionScript = `#compdef shbx
 
 _shbx() {
-  local -a commands hosts shells
+  local -a commands hosts tunnels tunnel_commands shells
 
   if (( CURRENT == 2 )); then
     commands=("${(@f)$(shbx __complete commands -- "$words[CURRENT]")}")
@@ -1133,6 +1561,18 @@ _shbx() {
       if (( CURRENT == 3 )); then
         hosts=("${(@f)$(shbx __complete hosts -- "$words[CURRENT]")}")
         _describe 'saved hosts' hosts
+        return
+      fi
+      ;;
+    tunnel)
+      if (( CURRENT == 3 )); then
+        tunnel_commands=(add list show start stop remove)
+        _describe 'tunnel commands' tunnel_commands
+        return
+      fi
+      if (( CURRENT == 4 )) && [[ "$words[3]" == (show|start|stop|remove) ]]; then
+        tunnels=("${(@f)$(shbx __complete tunnels -- "$words[CURRENT]")}")
+        _describe 'saved tunnels' tunnels
         return
       fi
       ;;
@@ -1161,6 +1601,7 @@ end
 
 complete -c shbx -n '__shbx_needs_command' -a '(shbx __complete commands -- (commandline -ct))'
 complete -c shbx -n '__shbx_using_command connect; or __shbx_using_command show; or __shbx_using_command edit; or __shbx_using_command remove' -a '(shbx __complete hosts -- (commandline -ct))'
+complete -c shbx -n '__shbx_using_command tunnel' -a 'add list show start stop remove'
 complete -c shbx -n '__shbx_using_command completion' -a 'bash zsh fish'
 `
 
@@ -1176,6 +1617,196 @@ func buildSSHArgs(host config.Host) []string {
 	}
 
 	return append(args, formatSSHTarget(host))
+}
+
+func buildTunnelSSHArgs(host config.Host, tunnel config.Tunnel) []string {
+	args := buildSSHArgs(host)
+	forwardFlag, spec := tunnelForwardSpec(tunnel)
+	args = append(args[:len(args)-1], "-N", "-T", forwardFlag, spec, args[len(args)-1])
+	return args
+}
+
+func buildTunnelStartSSHArgs(name string, host config.Host, tunnel config.Tunnel) ([]string, error) {
+	controlPath, err := tunnelstate.ControlPath(name)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(controlPath), 0o700); err != nil {
+		return nil, err
+	}
+	args := buildSSHArgs(host)
+	forwardFlag, spec := tunnelForwardSpec(tunnel)
+	args = append(args[:len(args)-1], "-M", "-S", controlPath, "-f", "-N", "-T", forwardFlag, spec, args[len(args)-1])
+	return args, nil
+}
+
+func buildTunnelControlSSHArgs(name string, host config.Host, operation string) ([]string, error) {
+	controlPath, err := tunnelstate.ControlPath(name)
+	if err != nil {
+		return nil, err
+	}
+	args := buildSSHArgs(host)
+	args = append(args[:len(args)-1], "-S", controlPath, "-O", operation, args[len(args)-1])
+	return args, nil
+}
+
+func tunnelForwardSpec(tunnel config.Tunnel) (string, string) {
+	bind := ""
+	if tunnel.BindAddress != "" {
+		bind = tunnel.BindAddress + ":"
+	}
+
+	switch tunnel.Type {
+	case "remote":
+		return "-R", fmt.Sprintf("%s%d:%s:%d", bind, tunnel.RemotePort, tunnel.RemoteHost, tunnel.LocalPort)
+	case "dynamic":
+		return "-D", fmt.Sprintf("%s%d", bind, tunnel.LocalPort)
+	default:
+		return "-L", fmt.Sprintf("%s%d:%s:%d", bind, tunnel.LocalPort, tunnel.RemoteHost, tunnel.RemotePort)
+	}
+}
+
+func validateTunnel(tunnel config.Tunnel, hosts map[string]config.Host) error {
+	if strings.TrimSpace(tunnel.Host) == "" {
+		return errors.New("missing saved host; pass --host")
+	}
+	if _, ok := hosts[tunnel.Host]; !ok {
+		return fmt.Errorf("host %q not found", tunnel.Host)
+	}
+
+	switch tunnel.Type {
+	case "local":
+		if err := validatePort("local port", tunnel.LocalPort); err != nil {
+			return err
+		}
+		if strings.TrimSpace(tunnel.RemoteHost) == "" {
+			return errors.New("missing remote host; pass --remote-host")
+		}
+		return validatePort("remote port", tunnel.RemotePort)
+	case "remote":
+		if err := validatePort("remote port", tunnel.RemotePort); err != nil {
+			return err
+		}
+		if strings.TrimSpace(tunnel.RemoteHost) == "" {
+			return errors.New("missing local target host; pass --remote-host")
+		}
+		return validatePort("local target port", tunnel.LocalPort)
+	case "dynamic":
+		if strings.TrimSpace(tunnel.RemoteHost) != "" || tunnel.RemotePort != 0 {
+			return errors.New("dynamic tunnels cannot use --remote-host or --remote-port")
+		}
+		return validatePort("dynamic port", tunnel.LocalPort)
+	default:
+		return fmt.Errorf("invalid tunnel type %q; expected local, remote, or dynamic", tunnel.Type)
+	}
+}
+
+func validatePort(label string, port int) error {
+	if port <= 0 || port > 65535 {
+		return fmt.Errorf("invalid %s %d", label, port)
+	}
+	return nil
+}
+
+func startTunnelProcess(name string, host config.Host, tunnel config.Tunnel, allowPrompt bool) (int, error) {
+	sshArgs, err := buildTunnelStartSSHArgs(name, host, tunnel)
+	if err != nil {
+		return 0, err
+	}
+	if host.Password != "" {
+		if err := runSSHWithStoredPassword(host.Password, sshArgs); err != nil {
+			return 0, err
+		}
+	} else {
+		if err := runSSHAndWait(sshArgs, allowPrompt); err != nil {
+			return 0, err
+		}
+	}
+
+	pid, err := tunnelMasterPID(name, host)
+	if err != nil {
+		return 0, err
+	}
+	controlPath, err := tunnelstate.ControlPath(name)
+	if err != nil {
+		return 0, err
+	}
+	if err := tunnelstate.Set(name, tunnelstate.NewEntry(pid, tunnelCommandString(host, sshArgs), controlPath)); err != nil {
+		return 0, err
+	}
+	return pid, nil
+}
+
+func stopTunnelByName(name string, host config.Host) (bool, tunnelstate.Entry, error) {
+	entry, running, err := tunnelstate.Get(name)
+	if err != nil {
+		return false, tunnelstate.Entry{}, err
+	}
+	if !running {
+		return false, tunnelstate.Entry{}, nil
+	}
+	controlArgs, err := buildTunnelControlSSHArgs(name, host, "exit")
+	if err == nil {
+		_ = runSSHAndWait(controlArgs, false)
+	}
+	_, _, stopErr := tunnelstate.Stop(name)
+	if stopErr != nil {
+		return false, tunnelstate.Entry{}, stopErr
+	}
+	return true, entry, nil
+}
+
+func runSSHAndWait(sshArgs []string, allowPrompt bool) error {
+	cmd := exec.Command(sshBinary(), sshArgs...)
+	if allowPrompt {
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stdin = nil
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+	}
+	return cmd.Run()
+}
+
+func tunnelMasterPID(name string, host config.Host) (int, error) {
+	controlArgs, err := buildTunnelControlSSHArgs(name, host, "check")
+	if err != nil {
+		return 0, err
+	}
+	cmd := exec.Command(sshBinary(), controlArgs...)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Run(); err != nil {
+		return 0, fmt.Errorf("check tunnel master: %w: %s", err, strings.TrimSpace(output.String()))
+	}
+	pid, ok := parseMasterPID(output.String())
+	if !ok {
+		return 0, fmt.Errorf("cannot read tunnel master pid from: %s", strings.TrimSpace(output.String()))
+	}
+	return pid, nil
+}
+
+func parseMasterPID(output string) (int, bool) {
+	start := strings.Index(output, "pid=")
+	if start == -1 {
+		return 0, false
+	}
+	start += len("pid=")
+	end := start
+	for end < len(output) && output[end] >= '0' && output[end] <= '9' {
+		end++
+	}
+	if end == start {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(output[start:end])
+	if err != nil {
+		return 0, false
+	}
+	return pid, true
 }
 
 func formatSSHTarget(host config.Host) string {
@@ -1200,6 +1831,30 @@ func formatListKey(host config.Host) string {
 		return "-"
 	}
 	return host.IdentityFile
+}
+
+func formatTunnelForward(tunnel config.Tunnel) string {
+	bind := tunnel.BindAddress
+	if bind == "" {
+		bind = "localhost"
+	}
+
+	switch tunnel.Type {
+	case "remote":
+		return fmt.Sprintf("%s:%d -> %s:%d", bind, tunnel.RemotePort, tunnel.RemoteHost, tunnel.LocalPort)
+	case "dynamic":
+		return fmt.Sprintf("SOCKS %s:%d", bind, tunnel.LocalPort)
+	default:
+		return fmt.Sprintf("%s:%d -> %s:%d", bind, tunnel.LocalPort, tunnel.RemoteHost, tunnel.RemotePort)
+	}
+}
+
+func formatTunnelStatus(state tunnelstate.State, name string) string {
+	entry, ok := state.Tunnels[name]
+	if !ok || !tunnelstate.IsRunning(entry.PID) {
+		return "stopped"
+	}
+	return "running"
 }
 
 type identityFileChoice struct {
@@ -1263,6 +1918,17 @@ func connectCommandString(host config.Host, sshArgs []string) string {
 	return shellCommandString("ssh", sshArgs) + " # password: set"
 }
 
+func tunnelCommandString(host config.Host, sshArgs []string) string {
+	return connectCommandString(host, sshArgs)
+}
+
+func sshBinary() string {
+	if value := strings.TrimSpace(os.Getenv("SHBX_SSH_BIN")); value != "" {
+		return value
+	}
+	return "ssh"
+}
+
 func runSSHWithPassword(password string, sshArgs []string) error {
 	stdin, ok := terminalFile(os.Stdin)
 	if !ok {
@@ -1303,6 +1969,31 @@ func runSSHWithPassword(password string, sshArgs []string) error {
 	outputDone := make(chan error, 1)
 	go func() {
 		outputDone <- copySSHOutputAndInjectPassword(os.Stdout, ptmx, password)
+	}()
+
+	waitErr := cmd.Wait()
+	_ = ptmx.Close()
+
+	outputErr := <-outputDone
+	if waitErr != nil {
+		return waitErr
+	}
+	if outputErr != nil && !errors.Is(outputErr, os.ErrClosed) {
+		return outputErr
+	}
+	return nil
+}
+
+func runSSHWithStoredPassword(password string, sshArgs []string) error {
+	cmd := exec.Command(sshBinary(), sshArgs...)
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		return err
+	}
+
+	outputDone := make(chan error, 1)
+	go func() {
+		outputDone <- copySSHOutputAndInjectPassword(io.Discard, ptmx, password)
 	}()
 
 	waitErr := cmd.Wait()
@@ -1483,6 +2174,116 @@ func promptIdentityFile(reader *bufio.Reader, out io.Writer, hosts map[string]co
 		return choices[index-1].path, nil
 	}
 	return text, nil
+}
+
+func promptTunnel(reader *bufio.Reader, out io.Writer, hosts map[string]config.Host, current config.Tunnel) (config.Tunnel, error) {
+	var err error
+
+	current.Host, err = promptSavedHost(reader, out, hosts, current.Host)
+	if err != nil {
+		return config.Tunnel{}, err
+	}
+
+	current.Type, err = promptWithDefault(reader, out, "Type [local|remote|dynamic]", defaultString(current.Type, "local"))
+	if err != nil {
+		return config.Tunnel{}, err
+	}
+	current.Type = strings.ToLower(strings.TrimSpace(current.Type))
+	if current.Type == "" {
+		current.Type = "local"
+	}
+
+	current.BindAddress, err = promptWithDefault(reader, out, "Bind address [Enter localhost/default]", current.BindAddress)
+	if err != nil {
+		return config.Tunnel{}, err
+	}
+
+	switch current.Type {
+	case "dynamic":
+		current.LocalPort, err = promptPort(reader, out, "Dynamic local port", current.LocalPort)
+		if err != nil {
+			return config.Tunnel{}, err
+		}
+		current.RemoteHost = ""
+		current.RemotePort = 0
+	case "remote":
+		current.RemotePort, err = promptPort(reader, out, "Remote listen port", current.RemotePort)
+		if err != nil {
+			return config.Tunnel{}, err
+		}
+		current.RemoteHost, err = promptWithDefault(reader, out, "Local target host", current.RemoteHost)
+		if err != nil {
+			return config.Tunnel{}, err
+		}
+		current.LocalPort, err = promptPort(reader, out, "Local target port", current.LocalPort)
+		if err != nil {
+			return config.Tunnel{}, err
+		}
+	default:
+		current.LocalPort, err = promptPort(reader, out, "Local port", current.LocalPort)
+		if err != nil {
+			return config.Tunnel{}, err
+		}
+		current.RemoteHost, err = promptWithDefault(reader, out, "Remote host", current.RemoteHost)
+		if err != nil {
+			return config.Tunnel{}, err
+		}
+		current.RemotePort, err = promptPort(reader, out, "Remote port", current.RemotePort)
+		if err != nil {
+			return config.Tunnel{}, err
+		}
+	}
+	return current, nil
+}
+
+func promptSavedHost(reader *bufio.Reader, out io.Writer, hosts map[string]config.Host, current string) (string, error) {
+	names := make([]string, 0, len(hosts))
+	for name := range hosts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) > 0 {
+		fmt.Fprintln(out, "Saved hosts:")
+		for i, name := range names {
+			fmt.Fprintf(out, "  %d) %s (%s)\n", i+1, name, formatListTarget(hosts[name]))
+		}
+	}
+
+	label := "Saved SSH host"
+	if len(names) > 0 {
+		label = "Saved SSH host [number or name]"
+	}
+	text, err := promptWithDefault(reader, out, label, current)
+	if err != nil {
+		return "", err
+	}
+	if index, err := strconv.Atoi(text); err == nil && index >= 1 && index <= len(names) {
+		return names[index-1], nil
+	}
+	return text, nil
+}
+
+func promptPort(reader *bufio.Reader, out io.Writer, label string, current int) (int, error) {
+	currentText := ""
+	if current != 0 {
+		currentText = strconv.Itoa(current)
+	}
+	text, err := promptWithDefault(reader, out, label, currentText)
+	if err != nil {
+		return 0, err
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(text))
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s %q", strings.ToLower(label), text)
+	}
+	return port, nil
+}
+
+func defaultString(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func promptPassword(reader *bufio.Reader, in io.Reader, out io.Writer, label string) (string, error) {

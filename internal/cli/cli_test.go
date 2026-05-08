@@ -253,6 +253,174 @@ func TestConnectDryRunWithPasswordUsesSSHPasswordWrapper(t *testing.T) {
 	}
 }
 
+func TestTunnelAddListShowStartDryRunAndRemove(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{
+		Host:         "prod.example",
+		User:         "deploy",
+		Port:         2222,
+		IdentityFile: "/tmp/key with space",
+	})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"tunnel", "add", "db", "--host", "prod", "--local-port", "5432", "--remote-host", "127.0.0.1", "--remote-port", "5432"}); err != nil {
+		t.Fatalf("tunnel add: %v", err)
+	}
+	assertTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+
+	out.Reset()
+	if err := app.Run([]string{"tunnel", "list"}); err != nil {
+		t.Fatalf("tunnel list: %v", err)
+	}
+	for _, want := range []string{"NAME", "TYPE", "SSH HOST", "FORWARD", "db", "local", "prod", "localhost:5432 -> 127.0.0.1:5432"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("tunnel list missing %q in %q", want, out.String())
+		}
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"tunnel", "show", "db"}); err != nil {
+		t.Fatalf("tunnel show: %v", err)
+	}
+	for _, want := range []string{"Command: ssh -p 2222 -i '/tmp/key with space'", "-M -S", "-f -N -T -L 5432:127.0.0.1:5432 deploy@prod.example"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("tunnel show missing %q in %q", want, out.String())
+		}
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"tunnel", "start", "db", "--dry-run"}); err != nil {
+		t.Fatalf("tunnel start --dry-run: %v", err)
+	}
+	for _, want := range []string{"ssh -p 2222 -i '/tmp/key with space'", "-M -S", "-f -N -T -L 5432:127.0.0.1:5432 deploy@prod.example\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("tunnel dry-run output missing %q in %q", want, out.String())
+		}
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"tunnel", "remove", "db", "--yes"}); err != nil {
+		t.Fatalf("tunnel remove: %v", err)
+	}
+	assertTunnelMissing(t, "db")
+}
+
+func TestTunnelDynamicDryRun(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy"})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"tunnel", "add", "socks", "--host", "prod", "--dynamic-port", "1080", "--bind", "127.0.0.1"}); err != nil {
+		t.Fatalf("tunnel add dynamic: %v", err)
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"tunnel", "start", "socks", "--print"}); err != nil {
+		t.Fatalf("tunnel dynamic print: %v", err)
+	}
+	for _, want := range []string{"ssh -p 22", "-M -S", "-f -N -T -D 127.0.0.1:1080 deploy@prod.example\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("dynamic tunnel output missing %q in %q", want, out.String())
+		}
+	}
+}
+
+func TestTunnelStartRunsInBackgroundAndStopTerminatesIt(t *testing.T) {
+	withTempHome(t)
+	t.Setenv("SHBX_SSH_BIN", fakeSSHBinary(t))
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy"})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"tunnel", "add", "db", "--host", "prod", "--local-port", "5432", "--remote-host", "127.0.0.1", "--remote-port", "5432"}); err != nil {
+		t.Fatalf("tunnel add: %v", err)
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"tunnel", "start", "db"}); err != nil {
+		t.Fatalf("tunnel start: %v", err)
+	}
+	if !strings.Contains(out.String(), "Started tunnel \"db\" in background with pid") {
+		t.Fatalf("unexpected start output %q", out.String())
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"tunnel", "list"}); err != nil {
+		t.Fatalf("tunnel list: %v", err)
+	}
+	if !strings.Contains(out.String(), "running") {
+		t.Fatalf("expected running status, got %q", out.String())
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"tunnel", "stop", "db"}); err != nil {
+		t.Fatalf("tunnel stop: %v", err)
+	}
+	if !strings.Contains(out.String(), "Stopped tunnel \"db\" with pid") {
+		t.Fatalf("unexpected stop output %q", out.String())
+	}
+}
+
+func TestTunnelStartSupportsSavedPassword(t *testing.T) {
+	withTempHome(t)
+	t.Setenv("SHBX_SSH_BIN", fakeSSHBinary(t))
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy", Password: "secret"})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"tunnel", "add", "db", "--host", "prod", "--local-port", "5432", "--remote-host", "127.0.0.1", "--remote-port", "5432"}); err != nil {
+		t.Fatalf("tunnel add: %v", err)
+	}
+	out.Reset()
+	if err := app.Run([]string{"tunnel", "start", "db"}); err != nil {
+		t.Fatalf("tunnel start with saved password: %v", err)
+	}
+	if !strings.Contains(out.String(), "Started tunnel \"db\" in background with pid") {
+		t.Fatalf("unexpected start output %q", out.String())
+	}
+	if err := app.Run([]string{"tunnel", "stop", "db"}); err != nil {
+		t.Fatalf("tunnel stop: %v", err)
+	}
+}
+
+func TestTunnelAddWithoutNamePrompts(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy"})
+
+	var out bytes.Buffer
+	app := App{
+		in:  strings.NewReader("db\n1\nlocal\n\n5432\n127.0.0.1\n5432\n"),
+		out: &out,
+	}
+	if err := app.Run([]string{"tunnel", "add"}); err != nil {
+		t.Fatalf("interactive tunnel add: %v", err)
+	}
+
+	assertTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+	if !strings.Contains(out.String(), "Saved hosts:") || !strings.Contains(out.String(), "Added tunnel \"db\"") {
+		t.Fatalf("expected interactive tunnel output, got %q", out.String())
+	}
+}
+
+func TestTunnelValidationRequiresSavedHostAndPorts(t *testing.T) {
+	withTempHome(t)
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	err := app.Run([]string{"tunnel", "add", "db", "--host", "missing", "--local-port", "5432", "--remote-host", "127.0.0.1", "--remote-port", "5432"})
+	if err == nil || !strings.Contains(err.Error(), "host \"missing\" not found") {
+		t.Fatalf("expected missing host error, got %v", err)
+	}
+
+	addHost(t, "prod", config.Host{Host: "prod.example"})
+	err = app.Run([]string{"tunnel", "add", "db", "--host", "prod", "--local-port", "0", "--remote-host", "127.0.0.1", "--remote-port", "5432"})
+	if err == nil || !strings.Contains(err.Error(), "invalid local port 0") {
+		t.Fatalf("expected invalid port error, got %v", err)
+	}
+}
+
 func TestCompletionListsMatchingHosts(t *testing.T) {
 	withTempHome(t)
 	addHost(t, "prod", config.Host{Host: "prod.example"})
@@ -492,6 +660,85 @@ func assertHostMissing(t *testing.T, name string) {
 	if _, ok := cfg.Hosts[name]; ok {
 		t.Fatalf("host %q still exists", name)
 	}
+}
+
+func assertTunnel(t *testing.T, name string, want config.Tunnel) {
+	t.Helper()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	got, ok := cfg.Tunnels[name]
+	if !ok {
+		t.Fatalf("tunnel %q missing", name)
+	}
+	if got != want {
+		t.Fatalf("tunnel %q = %+v, want %+v", name, got, want)
+	}
+}
+
+func assertTunnelMissing(t *testing.T, name string) {
+	t.Helper()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if _, ok := cfg.Tunnels[name]; ok {
+		t.Fatalf("tunnel %q still exists", name)
+	}
+}
+
+func fakeSSHBinary(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "fake-ssh")
+	script := `#!/bin/sh
+socket=""
+operation=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -S)
+      socket="$2"
+      shift 2
+      ;;
+    -O)
+      operation="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+pidfile="${socket}.pid"
+if [ "$operation" = "check" ]; then
+  pid="$(cat "$pidfile" 2>/dev/null)"
+  if [ -n "$pid" ]; then
+    echo "Master running (pid=$pid)" >&2
+    exit 0
+  fi
+  echo "No master running" >&2
+  exit 255
+fi
+if [ "$operation" = "exit" ]; then
+  pid="$(cat "$pidfile" 2>/dev/null)"
+  if [ -n "$pid" ]; then
+    kill "$pid" 2>/dev/null || true
+    rm -f "$pidfile"
+  fi
+  exit 0
+fi
+mkdir -p "$(dirname "$socket")"
+nohup sh -c "trap 'exit 0' TERM INT; while true; do sleep 1; done" >/dev/null 2>&1 &
+echo $! > "$pidfile"
+exit 0
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ssh: %v", err)
+	}
+	return path
 }
 
 func captureStderr(t *testing.T, fn func()) string {
