@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -253,6 +254,28 @@ func TestConnectDryRunWithPasswordUsesSSHPasswordWrapper(t *testing.T) {
 	}
 }
 
+func TestConnectShowsStartAndClosedStatus(t *testing.T) {
+	withTempHome(t)
+	t.Setenv("SHBX_SSH_BIN", fakeSSHExitBinary(t, 0))
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy"})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"connect", "prod"}); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{
+		"Connecting to \"prod\" (deploy@prod.example:22)...",
+		"Connection closed.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("connect output missing %q in %q", want, got)
+		}
+	}
+}
+
 func TestTunnelAddListShowStartDryRunAndRemove(t *testing.T) {
 	withTempHome(t)
 	addHost(t, "prod", config.Host{
@@ -342,6 +365,9 @@ func TestTunnelStartRunsInBackgroundAndStopTerminatesIt(t *testing.T) {
 	if err := app.Run([]string{"tunnel", "start", "db"}); err != nil {
 		t.Fatalf("tunnel start: %v", err)
 	}
+	if !strings.Contains(out.String(), "Starting tunnel \"db\"...") {
+		t.Fatalf("expected starting status, got %q", out.String())
+	}
 	if !strings.Contains(out.String(), "Started tunnel \"db\" in background with pid") {
 		t.Fatalf("unexpected start output %q", out.String())
 	}
@@ -357,6 +383,9 @@ func TestTunnelStartRunsInBackgroundAndStopTerminatesIt(t *testing.T) {
 	out.Reset()
 	if err := app.Run([]string{"tunnel", "stop", "db"}); err != nil {
 		t.Fatalf("tunnel stop: %v", err)
+	}
+	if !strings.Contains(out.String(), "Stopping tunnel \"db\" with pid") {
+		t.Fatalf("expected stopping status, got %q", out.String())
 	}
 	if !strings.Contains(out.String(), "Stopped tunnel \"db\" with pid") {
 		t.Fatalf("unexpected stop output %q", out.String())
@@ -735,6 +764,17 @@ nohup sh -c "trap 'exit 0' TERM INT; while true; do sleep 1; done" >/dev/null 2>
 echo $! > "$pidfile"
 exit 0
 `
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ssh: %v", err)
+	}
+	return path
+}
+
+func fakeSSHExitBinary(t *testing.T, code int) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "fake-ssh")
+	script := fmt.Sprintf("#!/bin/sh\nexit %d\n", code)
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ssh: %v", err)
 	}

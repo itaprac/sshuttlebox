@@ -413,16 +413,23 @@ func (a App) runConnect(args []string) error {
 
 	_ = history.Append(name, time.Now())
 
+	fmt.Fprintf(a.out, "Connecting to %q (%s)...\n", name, formatListTarget(host))
+	var runErr error
 	if host.Password != "" {
-		return runSSHWithPassword(host.Password, sshArgs)
+		runErr = runSSHWithPassword(host.Password, sshArgs)
+	} else {
+		cmd := exec.Command(sshBinary(), sshArgs...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		runErr = cmd.Run()
 	}
-
-	cmd := exec.Command(sshBinary(), sshArgs...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
+	if runErr != nil {
+		return fmt.Errorf("connect %q: %w", name, runErr)
+	}
+	fmt.Fprintln(a.out, "Connection closed.")
+	return nil
 }
 
 func (a App) runTunnel(args []string) error {
@@ -686,9 +693,10 @@ func (a App) runTunnelStart(args []string) error {
 		return nil
 	}
 
+	fmt.Fprintf(a.out, "Starting tunnel %q...\n", name)
 	pid, err := startTunnelProcess(name, host, tunnel, true)
 	if err != nil {
-		return err
+		return fmt.Errorf("start tunnel %q: %w", name, err)
 	}
 	fmt.Fprintf(a.out, "Started tunnel %q in background with pid %d\n", name, pid)
 	return nil
@@ -719,6 +727,14 @@ func (a App) runTunnelStop(args []string) error {
 		return fmt.Errorf("host %q for tunnel %q not found", tunnel.Host, name)
 	}
 
+	if entry, running, err := tunnelstate.Get(name); err != nil {
+		return err
+	} else if !running {
+		fmt.Fprintf(a.out, "Tunnel %q is not running\n", name)
+		return nil
+	} else {
+		fmt.Fprintf(a.out, "Stopping tunnel %q with pid %d...\n", name, entry.PID)
+	}
 	stopped, entry, err := stopTunnelByName(name, host)
 	if err != nil {
 		return err
@@ -1935,7 +1951,7 @@ func runSSHWithPassword(password string, sshArgs []string) error {
 		return errors.New("password auto-login requires an interactive terminal")
 	}
 
-	cmd := exec.Command("ssh", sshArgs...)
+	cmd := exec.Command(sshBinary(), sshArgs...)
 	ptmx, err := startSSHPTY(cmd, stdin)
 	if err != nil {
 		return err
