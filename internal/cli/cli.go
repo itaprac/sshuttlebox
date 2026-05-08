@@ -37,8 +37,7 @@ func Run(args []string) error {
 
 func (a App) Run(args []string) error {
 	if len(args) == 0 {
-		a.printHelp()
-		return nil
+		return a.runUI(nil)
 	}
 
 	switch args[0] {
@@ -62,6 +61,8 @@ func (a App) Run(args []string) error {
 		return a.runEdit(args[1:])
 	case "remove":
 		return a.runRemove(args[1:])
+	case "ui":
+		return a.runUI(args[1:])
 	case "completion":
 		return a.runCompletion(args[1:])
 	case "__complete":
@@ -72,7 +73,7 @@ func (a App) Run(args []string) error {
 }
 
 func (a App) runAdd(args []string) error {
-	const usage = "usage: shbx add [name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]"
+	const usage = "usage: shbx add [name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]"
 
 	name := ""
 	flagArgs := args
@@ -89,6 +90,7 @@ func (a App) runAdd(args []string) error {
 	passwordFlag := fs.String("password", "", "SSH password")
 	portFlag := fs.Int("port", 0, "SSH port")
 	identityFileFlag := fs.String("identity-file", "", "SSH identity file")
+	identityFromFlag := fs.String("identity-from", "", "Reuse SSH identity file from another saved host")
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return fmt.Errorf(usage)
@@ -96,6 +98,9 @@ func (a App) runAdd(args []string) error {
 
 	if fs.NArg() != 0 {
 		return fmt.Errorf(usage)
+	}
+	if flagWasSet(fs, "identity-file") && flagWasSet(fs, "identity-from") {
+		return errors.New("--identity-file and --identity-from cannot be used together")
 	}
 
 	interactive := isTerminalInput(a.in)
@@ -154,6 +159,7 @@ func (a App) runAdd(args []string) error {
 	user := strings.TrimSpace(*userFlag)
 	password := *passwordFlag
 	identityFile := strings.TrimSpace(*identityFileFlag)
+	identityFrom := strings.TrimSpace(*identityFromFlag)
 	port := *portFlag
 
 	if existed {
@@ -171,6 +177,13 @@ func (a App) runAdd(args []string) error {
 		}
 		if !flagWasSet(fs, "identity-file") {
 			identityFile = existingHost.IdentityFile
+		}
+	}
+	if flagWasSet(fs, "identity-from") {
+		var err error
+		identityFile, err = identityFileFromHost(cfg.Hosts, identityFrom)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -210,7 +223,7 @@ func (a App) runAdd(args []string) error {
 			}
 		}
 		if identityFile == "" {
-			identityFile, err = prompt(reader, a.out, "Identity file")
+			identityFile, err = promptIdentityFile(reader, a.out, cfg.Hosts, name, identityFile)
 			if err != nil {
 				return err
 			}
@@ -249,7 +262,7 @@ func (a App) runAdd(args []string) error {
 			}
 		}
 
-		identityFile, err = promptWithDefault(reader, a.out, "Identity file", identityFile)
+		identityFile, err = promptIdentityFile(reader, a.out, cfg.Hosts, name, identityFile)
 		if err != nil {
 			return err
 		}
@@ -406,7 +419,7 @@ func (a App) runConnect(args []string) error {
 
 func (a App) runEdit(args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]")
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]")
 	}
 
 	fs := flag.NewFlagSet("edit", flag.ContinueOnError)
@@ -418,13 +431,17 @@ func (a App) runEdit(args []string) error {
 	passwordFlag := fs.String("password", "", "SSH password")
 	portFlag := fs.Int("port", 0, "SSH port")
 	identityFileFlag := fs.String("identity-file", "", "SSH identity file")
+	identityFromFlag := fs.String("identity-from", "", "Reuse SSH identity file from another saved host")
 
 	if err := fs.Parse(args[1:]); err != nil {
-		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]")
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]")
 	}
 
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]")
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]")
+	}
+	if flagWasSet(fs, "identity-file") && flagWasSet(fs, "identity-from") {
+		return errors.New("--identity-file and --identity-from cannot be used together")
 	}
 
 	name := strings.TrimSpace(args[0])
@@ -497,7 +514,7 @@ func (a App) runEdit(args []string) error {
 			host.Port = port
 		}
 
-		identityFileText, err := promptWithDefault(reader, a.out, "Identity file", host.IdentityFile)
+		identityFileText, err := promptIdentityFile(reader, a.out, cfg.Hosts, name, host.IdentityFile)
 		if err != nil {
 			return err
 		}
@@ -520,6 +537,13 @@ func (a App) runEdit(args []string) error {
 		}
 		if flagWasSet(fs, "identity-file") {
 			host.IdentityFile = strings.TrimSpace(*identityFileFlag)
+		}
+		if flagWasSet(fs, "identity-from") {
+			identityFile, err := identityFileFromHost(cfg.Hosts, strings.TrimSpace(*identityFromFlag))
+			if err != nil {
+				return err
+			}
+			host.IdentityFile = identityFile
 		}
 	}
 
@@ -749,6 +773,7 @@ func (a App) printHelp() {
 	fmt.Fprint(a.out, `sshuttlebox (shbx) - SSH connection helper
 
 Usage:
+  shbx                         Open the interactive terminal UI
   shbx <command> [arguments]
 
 Commands:
@@ -758,6 +783,7 @@ Commands:
   connect <name>   Connect to saved host over SSH
   edit <name>      Edit saved host
   remove <name>    Remove saved host
+  ui               Open the interactive terminal UI (default)
   completion       Generate shell completion script
   config init      Create config file if it does not exist
   config path      Print config file path
@@ -773,6 +799,7 @@ Add options:
   --password <password>        SSH password for automatic login
   --port <port>                SSH port, default 22
   --identity-file <path>       SSH private key path
+  --identity-from <host>       Reuse private key path from saved host
 
 Edit options:
   --name <name>                Rename saved host
@@ -781,6 +808,7 @@ Edit options:
   --password <password>        SSH password, empty clears
   --port <port>                SSH port, 0 uses default 22
   --identity-file <path>       SSH private key path, empty clears
+  --identity-from <host>       Reuse private key path from saved host
 
 Connect options:
   --dry-run                    Print SSH command without connecting
@@ -1027,7 +1055,7 @@ func completePrefix(args []string) string {
 }
 
 func completeCommandNames(prefix string) []string {
-	commands := []string{"add", "list", "show", "connect", "edit", "remove", "completion", "config", "version", "help"}
+	commands := []string{"add", "list", "show", "connect", "edit", "remove", "ui", "completion", "config", "version", "help"}
 	return filterSortedPrefix(commands, prefix)
 }
 
@@ -1168,6 +1196,51 @@ func formatListKey(host config.Host) string {
 		return "-"
 	}
 	return host.IdentityFile
+}
+
+type identityFileChoice struct {
+	path  string
+	hosts []string
+}
+
+func identityFileFromHost(hosts map[string]config.Host, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", errors.New("--identity-from requires a saved host name")
+	}
+
+	host, ok := hosts[name]
+	if !ok {
+		return "", fmt.Errorf("host %q not found", name)
+	}
+	if strings.TrimSpace(host.IdentityFile) == "" {
+		return "", fmt.Errorf("host %q has no identity file to reuse", name)
+	}
+	return host.IdentityFile, nil
+}
+
+func identityFileChoices(hosts map[string]config.Host, excludeName string) []identityFileChoice {
+	byPath := map[string][]string{}
+	for name, host := range hosts {
+		if name == excludeName || strings.TrimSpace(host.IdentityFile) == "" {
+			continue
+		}
+		byPath[host.IdentityFile] = append(byPath[host.IdentityFile], name)
+	}
+
+	choices := make([]identityFileChoice, 0, len(byPath))
+	for path, names := range byPath {
+		sort.Strings(names)
+		choices = append(choices, identityFileChoice{path: path, hosts: names})
+	}
+	sort.Slice(choices, func(i, j int) bool {
+		return choices[i].path < choices[j].path
+	})
+	return choices
+}
+
+func identityFileChoiceLabel(choice identityFileChoice) string {
+	return fmt.Sprintf("%s (from %s)", choice.path, strings.Join(choice.hosts, ", "))
 }
 
 func shellCommandString(command string, args []string) string {
@@ -1370,6 +1443,40 @@ func promptWithDefault(reader *bufio.Reader, out io.Writer, label, current strin
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return current, nil
+	}
+	return text, nil
+}
+
+func promptIdentityFile(reader *bufio.Reader, out io.Writer, hosts map[string]config.Host, currentHostName, current string) (string, error) {
+	choices := identityFileChoices(hosts, currentHostName)
+	if len(choices) > 0 {
+		fmt.Fprintln(out, "Saved identity files:")
+		for i, choice := range choices {
+			fmt.Fprintf(out, "  %d) %s\n", i+1, identityFileChoiceLabel(choice))
+		}
+	}
+
+	label := "Identity file"
+	if len(choices) > 0 {
+		label = "Identity file [number or path]"
+	}
+	if current != "" {
+		fmt.Fprintf(out, "%s [%s]: ", label, current)
+	} else {
+		fmt.Fprintf(out, "%s: ", label)
+	}
+
+	text, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return current, nil
+	}
+	if index, err := strconv.Atoi(text); err == nil && index >= 1 && index <= len(choices) {
+		return choices[index-1].path, nil
 	}
 	return text, nil
 }

@@ -129,6 +129,64 @@ func TestAddStoresPasswordAndShowMasksIt(t *testing.T) {
 	}
 }
 
+func TestAddCanReuseIdentityFileFromSavedHost(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "bastion", config.Host{Host: "bastion.example", IdentityFile: "~/.ssh/bastion_key"})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"add", "prod", "--host", "prod.example", "--user", "deploy", "--identity-from", "bastion"}); err != nil {
+		t.Fatalf("add with --identity-from: %v", err)
+	}
+
+	assertHost(t, "prod", config.Host{Host: "prod.example", User: "deploy", IdentityFile: "~/.ssh/bastion_key"})
+}
+
+func TestEditCanReuseIdentityFileFromSavedHost(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "bastion", config.Host{Host: "bastion.example", IdentityFile: "~/.ssh/bastion_key"})
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy"})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"edit", "prod", "--identity-from", "bastion"}); err != nil {
+		t.Fatalf("edit with --identity-from: %v", err)
+	}
+
+	assertHost(t, "prod", config.Host{Host: "prod.example", User: "deploy", IdentityFile: "~/.ssh/bastion_key"})
+}
+
+func TestAddInteractiveCanChooseExistingIdentityFileByNumber(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "bastion", config.Host{Host: "bastion.example", IdentityFile: "~/.ssh/bastion_key"})
+
+	var out bytes.Buffer
+	app := App{
+		in:  strings.NewReader("prod\nprod.example\ndeploy\n\n\n1\n"),
+		out: &out,
+	}
+	if err := app.Run([]string{"add"}); err != nil {
+		t.Fatalf("interactive add with identity choice: %v", err)
+	}
+
+	assertHost(t, "prod", config.Host{Host: "prod.example", User: "deploy", IdentityFile: "~/.ssh/bastion_key"})
+	if !strings.Contains(out.String(), "Saved identity files:") || !strings.Contains(out.String(), "1) ~/.ssh/bastion_key (from bastion)") {
+		t.Fatalf("expected identity choices in output, got %q", out.String())
+	}
+}
+
+func TestIdentityFromRequiresHostWithIdentityFile(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "no-key", config.Host{Host: "example.com"})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	err := app.Run([]string{"add", "prod", "--host", "prod.example", "--identity-from", "no-key"})
+	if err == nil || !strings.Contains(err.Error(), "host \"no-key\" has no identity file to reuse") {
+		t.Fatalf("expected missing identity error, got %v", err)
+	}
+}
+
 func TestShowDisplaysDefaultPort(t *testing.T) {
 	withTempHome(t)
 	addHost(t, "dev", config.Host{Host: "example.com", User: "root"})

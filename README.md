@@ -15,8 +15,10 @@ shbx connect prod
 - Add hosts interactively or with flags
 - List, show, edit, rename, and remove saved hosts
 - Connect through the system `ssh` command
+- Optional terminal UI with search and full host management
 - Preview generated SSH commands with `--dry-run`
 - Optional password-based automatic login
+- Reuse a saved private key path across hosts
 - Shell completion for saved host names
 - Warnings for missing SSH identity files
 
@@ -50,6 +52,12 @@ Add a host:
 shbx add prod --host 192.0.2.10 --user deploy --port 22 --identity-file ~/.ssh/id_ed25519
 ```
 
+Reuse a private key already saved on another host:
+
+```bash
+shbx add staging --host 192.0.2.11 --user deploy --identity-from prod
+```
+
 Connect to it:
 
 ```bash
@@ -62,18 +70,34 @@ Preview the command without connecting:
 shbx connect prod --dry-run
 ```
 
+Open the interactive terminal UI:
+
+```bash
+shbx ui
+```
+
 ## Usage
 
 ```bash
-shbx add [name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]
+shbx add [name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]
 shbx list
 shbx show <name>
 shbx connect <name> [--dry-run|--print]
-shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path]
+shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]
 shbx remove <name> [--yes|--force]
+shbx ui
 ```
 
 Run `shbx help` for the full command reference.
+
+## Terminal UI
+
+`shbx ui` opens an optional keyboard-first TUI for managing saved hosts. It
+supports filtering, adding, editing, removing, dry-run command preview, and
+connecting to the selected host. When you connect, the UI exits first and then
+starts the normal system `ssh` session. In the add/edit form, press `ctrl+k` by
+the identity-file field to choose a private key path already saved on another
+host.
 
 ## Shell Completion
 
