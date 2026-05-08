@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -14,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/itaprac/sshuttlebox/internal/config"
+	"github.com/itaprac/sshuttlebox/internal/history"
 )
 
 type tuiScreen int
@@ -36,15 +38,22 @@ const (
 	tuiFieldCount
 )
 
+const (
+	tuiSectionRecent = iota
+	tuiSectionAll
+)
+
 type tuiHostItem struct {
-	name string
-	host config.Host
+	name    string
+	host    config.Host
+	section int
 }
 
 type tuiModel struct {
 	path        string
 	cfg         config.Config
 	names       []string
+	hist        history.Log
 	cursor      int
 	width       int
 	height      int
@@ -145,9 +154,11 @@ func newTUIModelWithState(path string, cfg config.Config, err error) tuiModel {
 
 	h := help.New()
 	keys := newTUIKeyMap()
+	hist, _ := history.Load()
 	model := tuiModel{
 		path:   path,
 		cfg:    cfg,
+		hist:   hist,
 		screen: tuiScreenMain,
 		filter: filter,
 		help:   h,
@@ -427,13 +438,73 @@ func (m tuiModel) bannerView() string {
 	}
 	return lipgloss.JoinHorizontal(
 		lipgloss.Bottom,
-		bannerStyle.Render(bannerArt),
+		renderGradientBanner(),
 		"  ",
 		bannerTaglineStyle.Render("sshuttlebox "+Version) + "\n",
 	)
 }
 
+func renderGradientBanner() string {
+	lines := strings.Split(bannerArt, "\n")
+	width := 0
+	for _, line := range lines {
+		if w := lipgloss.Width(line); w > width {
+			width = w
+		}
+	}
+	if width == 0 {
+		return bannerStyle.Render(bannerArt)
+	}
+
+	out := make([]string, len(lines))
+	for li, line := range lines {
+		runes := []rune(line)
+		var b strings.Builder
+		segStart := 0
+		segColor := bannerColorAt(0, li, width)
+		for i := 1; i <= len(runes); i++ {
+			var nextColor lipgloss.Color
+			if i < len(runes) {
+				nextColor = bannerColorAt(i, li, width)
+			}
+			if i == len(runes) || nextColor != segColor {
+				style := lipgloss.NewStyle().Foreground(segColor).Bold(true)
+				b.WriteString(style.Render(string(runes[segStart:i])))
+				if i < len(runes) {
+					segStart = i
+					segColor = nextColor
+				}
+			}
+		}
+		out[li] = b.String()
+	}
+	return strings.Join(out, "\n")
+}
+
+func bannerColorAt(col, row, width int) lipgloss.Color {
+	if width <= 0 {
+		return bannerPalette[0]
+	}
+	pos := col + row
+	span := width + len(bannerPalette)
+	idx := pos * len(bannerPalette) / span
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(bannerPalette) {
+		idx = len(bannerPalette) - 1
+	}
+	return bannerPalette[idx]
+}
+
 func (m tuiModel) mainView() string {
+	if m.width != 0 && m.width < tuiNarrowWidth {
+		return m.narrowMainView()
+	}
+	return m.wideMainView()
+}
+
+func (m tuiModel) wideMainView() string {
 	leftContentWidth := maxInt(42, minInt(64, m.width/3))
 	rightContentWidth := maxInt(38, m.width-leftContentWidth-12)
 	if m.width == 0 {
@@ -442,8 +513,18 @@ func (m tuiModel) mainView() string {
 	}
 
 	left := panelStyle.Width(leftContentWidth).Render(m.listView(leftContentWidth))
-	right := panelStyle.Width(rightContentWidth).Render(m.detailsView(rightContentWidth))
+	detailsPanel := panelStyle.Width(rightContentWidth).Render(m.detailsView(rightContentWidth))
+	logPanel := panelStyle.Width(rightContentWidth).Render(m.connectLogView(rightContentWidth))
+	right := lipgloss.JoinVertical(lipgloss.Left, detailsPanel, logPanel)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+}
+
+func (m tuiModel) narrowMainView() string {
+	contentWidth := maxInt(36, m.width-8)
+	list := panelStyle.Width(contentWidth).Render(m.listView(contentWidth))
+	details := panelStyle.Width(contentWidth).Render(m.detailsView(contentWidth))
+	logPanel := panelStyle.Width(contentWidth).Render(m.connectLogView(contentWidth))
+	return lipgloss.JoinVertical(lipgloss.Left, list, details, logPanel)
 }
 
 func (m tuiModel) listView(width int) string {
@@ -462,7 +543,17 @@ func (m tuiModel) listView(width int) string {
 		b.WriteString(mutedStyle.Render("No saved hosts. Press a to add one."))
 		return b.String()
 	}
+
+	prevSection := -1
 	for i, item := range items {
+		if item.section != prevSection {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(subSectionStyle.Render(sectionLabel(item.section)))
+			b.WriteString("\n")
+			prevSection = item.section
+		}
 		if i == m.cursor {
 			line := hostRow(item, width-2, selectedTargetStyle)
 			b.WriteString(selectedStyle.Render(fitRow("> "+line, width)))
@@ -475,6 +566,66 @@ func (m tuiModel) listView(width int) string {
 		}
 	}
 	return b.String()
+}
+
+func sectionLabel(section int) string {
+	switch section {
+	case tuiSectionRecent:
+		return "▸ recent"
+	default:
+		return "▸ all"
+	}
+}
+
+func (m tuiModel) connectLogView(width int) string {
+	rows := []string{sectionTitleStyle.Render("RECENT CONNECTS")}
+	events := m.hist.Recent(5)
+	if len(events) == 0 {
+		rows = append(rows, "", mutedStyle.Render("No connections yet."))
+		return strings.Join(rows, "\n")
+	}
+	rows = append(rows, "")
+	maxLine := width - 4
+	if maxLine < 12 {
+		maxLine = 12
+	}
+	now := time.Now()
+	for _, ev := range events {
+		ago := relativeTime(now, ev.At)
+		nameMax := maxLine - lipgloss.Width(ago) - 3
+		if nameMax < 4 {
+			nameMax = 4
+		}
+		name := truncate(ev.HostName, nameMax)
+		gap := maxLine - lipgloss.Width(name) - lipgloss.Width(ago)
+		if gap < 1 {
+			gap = 1
+		}
+		rows = append(rows, name+strings.Repeat(" ", gap)+mutedStyle.Render(ago))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func relativeTime(now, t time.Time) string {
+	if t.IsZero() {
+		return "—"
+	}
+	d := now.Sub(t)
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	default:
+		return t.Format("2006-01-02")
+	}
 }
 
 func (m tuiModel) detailsView(width int) string {
@@ -585,13 +736,38 @@ func (m *tuiModel) ensureCursor() {
 
 func (m tuiModel) filteredItems() []tuiHostItem {
 	query := strings.ToLower(strings.TrimSpace(m.filter.Value()))
-	items := make([]tuiHostItem, 0, len(m.names))
-	for _, name := range m.names {
-		host := m.cfg.Hosts[name]
-		haystack := strings.ToLower(strings.Join([]string{name, host.Host, host.User, host.IdentityFile, formatListTarget(host)}, " "))
-		if query == "" || strings.Contains(haystack, query) {
-			items = append(items, tuiHostItem{name: name, host: host})
+	matches := func(name string, host config.Host) bool {
+		if query == "" {
+			return true
 		}
+		haystack := strings.ToLower(strings.Join([]string{name, host.Host, host.User, host.IdentityFile, formatListTarget(host)}, " "))
+		return strings.Contains(haystack, query)
+	}
+
+	recentNames := m.hist.RecentNames(5, func(name string) bool {
+		_, ok := m.cfg.Hosts[name]
+		return ok
+	})
+	inRecent := make(map[string]bool, len(recentNames))
+
+	items := make([]tuiHostItem, 0, len(m.names)+len(recentNames))
+	for _, name := range recentNames {
+		host := m.cfg.Hosts[name]
+		if !matches(name, host) {
+			continue
+		}
+		inRecent[name] = true
+		items = append(items, tuiHostItem{name: name, host: host, section: tuiSectionRecent})
+	}
+	for _, name := range m.names {
+		if inRecent[name] {
+			continue
+		}
+		host := m.cfg.Hosts[name]
+		if !matches(name, host) {
+			continue
+		}
+		items = append(items, tuiHostItem{name: name, host: host, section: tuiSectionAll})
 	}
 	return items
 }
@@ -852,6 +1028,7 @@ const (
 ╚══════╝╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝`
 	bannerMinWidth  = 60
 	bannerMinHeight = 24
+	tuiNarrowWidth  = 100
 )
 
 var (
@@ -862,12 +1039,23 @@ var (
 	sectionTitleStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("69"))
+	subSectionStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("105")).
+			Bold(true)
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("63"))
 	bannerStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("63")).
 			Bold(true)
+	bannerPalette = []lipgloss.Color{
+		lipgloss.Color("63"),
+		lipgloss.Color("99"),
+		lipgloss.Color("105"),
+		lipgloss.Color("141"),
+		lipgloss.Color("177"),
+		lipgloss.Color("213"),
+	}
 	bannerTaglineStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("69")).
 				Italic(true)

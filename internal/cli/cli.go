@@ -15,9 +15,11 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/itaprac/sshuttlebox/internal/config"
+	"github.com/itaprac/sshuttlebox/internal/history"
 	"golang.org/x/term"
 )
 
@@ -404,6 +406,8 @@ func (a App) runConnect(args []string) error {
 		fmt.Fprintln(a.out, connectCommandString(host, sshArgs))
 		return nil
 	}
+
+	_ = history.Append(name, time.Now())
 
 	if host.Password != "" {
 		return runSSHWithPassword(host.Password, sshArgs)
