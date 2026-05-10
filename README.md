@@ -14,6 +14,7 @@ shbx connect prod
 - Save SSH hosts under short names
 - Add hosts interactively or with flags
 - List, show, edit, rename, and remove saved hosts
+- Group saved hosts and tunnels
 - Connect through the system `ssh` command
 - Save and quickly start SSH local, remote, and SOCKS tunnels
 - Optional terminal UI with search and full host management
@@ -75,6 +76,15 @@ shbx tunnel list
 shbx tunnel stop db
 ```
 
+Group related hosts and tunnels:
+
+```bash
+shbx group add work
+shbx add prod --host 192.0.2.10 --group work
+shbx tunnel add db --host prod --local-port 5432 --remote-host 127.0.0.1 --remote-port 5432 --group work
+shbx group show work
+```
+
 Add a SOCKS tunnel:
 
 ```bash
@@ -97,17 +107,22 @@ shbx ui
 ## Usage
 
 ```bash
-shbx add [name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]
+shbx add [name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host] [--group group]
 shbx list
 shbx show <name>
 shbx connect <name> [--dry-run|--print]
-shbx tunnel add [name] --host <saved-host> (--local-port port --remote-host host --remote-port port | --dynamic-port port) [--type local|remote|dynamic] [--bind address]
+shbx tunnel add [name] --host <saved-host> (--local-port port --remote-host host --remote-port port | --dynamic-port port) [--type local|remote|dynamic] [--bind address] [--group group]
 shbx tunnel list
 shbx tunnel show <name>
 shbx tunnel start <name> [--dry-run|--print]
 shbx tunnel stop <name>
 shbx tunnel remove <name> [--yes|--force]
-shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]
+shbx group add <name>
+shbx group list
+shbx group show <name>
+shbx group rename <old-name> <new-name>
+shbx group remove <name> [--yes|--force]
+shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host] [--group group]
 shbx remove <name> [--yes|--force]
 shbx ui
 ```
@@ -119,14 +134,16 @@ Run `shbx help` for the full command reference.
 `shbx ui` opens an optional keyboard-first TUI for managing saved hosts and
 tunnels. It supports filtering, adding, editing, removing, dry-run command
 preview, and connecting to the selected host or starting/stopping the selected
-tunnel. Press `tab` to switch between hosts and tunnels. Host connections exit
+tunnel. Hosts and tunnels are shown under their groups. Press `tab` to switch
+between hosts and tunnels. Host connections exit
 the UI first and then start the normal system `ssh` session. Tunnels run in the
 background and remain visible as running until you stop them. Tunnel start uses
 OpenSSH background mode, so if SSH needs a password you can type it normally
 before the tunnel detaches. If the saved host has a password in the config,
 sshuttlebox can pass it through automatically. In the host add/edit form, press
 `ctrl+k` by the identity-file field to choose a private key path already saved
-on another host.
+on another host. In host and tunnel forms, press `ctrl+g` by the group field to
+choose an existing group.
 
 ## Shell Completion
 

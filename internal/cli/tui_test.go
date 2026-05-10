@@ -180,6 +180,123 @@ func TestTUITunnelFormCanChooseExistingHost(t *testing.T) {
 	}
 }
 
+func TestTUIFormsCanChooseExistingGroup(t *testing.T) {
+	withTempHome(t)
+	path, _, err := config.Init()
+	if err != nil {
+		t.Fatalf("init config: %v", err)
+	}
+	cfg := config.Default()
+	cfg.Groups["ops"] = config.Group{Name: "ops"}
+	cfg.Groups["work"] = config.Group{Name: "work"}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	model := newTUIModelWithState(path, cfg, nil)
+	model = openTUIForm(t, model, "", config.Host{})
+	updated, _ := model.updateForm(tea.KeyMsg{Type: tea.KeyCtrlG})
+	model = updated.(tuiModel)
+	if model.screen != tuiScreenGroupSelect {
+		t.Fatalf("screen = %v, want group select", model.screen)
+	}
+	if len(model.groupPick) != 2 {
+		t.Fatalf("group choices = %d, want 2", len(model.groupPick))
+	}
+	updated, _ = model.updateGroupSelect(keyMsg(tea.KeyDown))
+	model = updated.(tuiModel)
+	updated, _ = model.updateGroupSelect(keyMsg(tea.KeyEnter))
+	model = updated.(tuiModel)
+	if got := model.inputs[tuiFieldGroup].Value(); got != "work" {
+		t.Fatalf("host group after selection = %q, want work", got)
+	}
+	if model.screen != tuiScreenForm {
+		t.Fatalf("screen after host group selection = %v, want host form", model.screen)
+	}
+
+	model = openTUITunnelForm(t, model, "", config.Tunnel{})
+	updated, _ = model.updateTunnelForm(tea.KeyMsg{Type: tea.KeyCtrlG})
+	model = updated.(tuiModel)
+	updated, _ = model.updateGroupSelect(keyMsg(tea.KeyEnter))
+	model = updated.(tuiModel)
+	if got := model.inputs[tuiTunnelFieldGroup].Value(); got != "ops" {
+		t.Fatalf("tunnel group after selection = %q, want ops", got)
+	}
+	if model.screen != tuiScreenTunnelForm {
+		t.Fatalf("screen after tunnel group selection = %v, want tunnel form", model.screen)
+	}
+}
+
+func TestTUIFilterNarrowsHostsAndAllowsQInQuery(t *testing.T) {
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"prod": {Host: "prod.example"},
+			"qa":   {Host: "qa.example"},
+		},
+	}, nil)
+
+	updated, _ := model.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	model = updated.(tuiModel)
+	if !model.filter.Focused() {
+		t.Fatalf("filter should be focused after slash")
+	}
+
+	updated, cmd := model.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	model = updated.(tuiModel)
+	if cmd != nil {
+		if _, ok := cmd().(tea.QuitMsg); ok {
+			t.Fatalf("typing q in filter should not quit")
+		}
+	}
+	if !model.filter.Focused() {
+		t.Fatalf("typing q in filter should not quit")
+	}
+	if got := model.filter.Value(); got != "q" {
+		t.Fatalf("filter value = %q, want q", got)
+	}
+	items := model.filteredItems()
+	if len(items) != 1 || items[0].name != "qa" {
+		t.Fatalf("filtered items = %+v, want qa only", items)
+	}
+	hosts := model.hostsPaneView(60, true)
+	if !strings.Contains(hosts, "/ q") {
+		t.Fatalf("hosts pane should render active filter inside panel: %q", hosts)
+	}
+	tunnels := model.tunnelsPaneView(60, false)
+	if strings.Contains(tunnels, "/ q") {
+		t.Fatalf("inactive tunnels pane should not render host filter: %q", tunnels)
+	}
+}
+
+func TestTUIFilterRendersInsideTunnelsPane(t *testing.T) {
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"prod": {Host: "prod.example"},
+		},
+		Tunnels: map[string]config.Tunnel{
+			"db":    {Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432},
+			"socks": {Host: "prod", Type: "dynamic", LocalPort: 1080},
+		},
+	}, nil)
+	model.toggleMode()
+
+	updated, _ := model.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	model = updated.(tuiModel)
+	updated, _ = model.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	model = updated.(tuiModel)
+
+	hosts := model.hostsPaneView(60, false)
+	if strings.Contains(hosts, "/ s") {
+		t.Fatalf("inactive hosts pane should not render tunnel filter: %q", hosts)
+	}
+	tunnels := model.tunnelsPaneView(60, true)
+	if !strings.Contains(tunnels, "/ s") {
+		t.Fatalf("tunnels pane should render active filter inside panel: %q", tunnels)
+	}
+}
+
 func TestTUIConnectActionQuitsWithSelectedHost(t *testing.T) {
 	model := newTUIModelWithState("", config.Config{
 		Version: 1,
@@ -286,6 +403,30 @@ func TestTUIUnfocusedPaneDoesNotShowCursorMarker(t *testing.T) {
 	tunnels := model.tunnelsPaneView(52, false)
 	if strings.Contains(tunnels, "> db") {
 		t.Fatalf("unfocused tunnels pane still shows cursor marker: %q", tunnels)
+	}
+}
+
+func TestTUIListsGroupHostsAndTunnels(t *testing.T) {
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"dev":  {Host: "dev.example"},
+			"prod": {Host: "prod.example", Group: "work"},
+		},
+		Tunnels: map[string]config.Tunnel{
+			"db":    {Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432, Group: "work"},
+			"socks": {Host: "dev", Type: "dynamic", LocalPort: 1080},
+		},
+	}, nil)
+
+	hosts := model.hostsPaneView(60, true)
+	if !strings.Contains(hosts, "work") || !strings.Contains(hosts, "ungrouped") {
+		t.Fatalf("hosts pane missing group sections: %q", hosts)
+	}
+
+	tunnels := model.tunnelsPaneView(60, true)
+	if !strings.Contains(tunnels, "work") || !strings.Contains(tunnels, "ungrouped") {
+		t.Fatalf("tunnels pane missing group sections: %q", tunnels)
 	}
 }
 

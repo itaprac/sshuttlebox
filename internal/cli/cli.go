@@ -16,11 +16,9 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/creack/pty"
 	"github.com/itaprac/sshuttlebox/internal/config"
-	"github.com/itaprac/sshuttlebox/internal/history"
 	"github.com/itaprac/sshuttlebox/internal/tunnelstate"
 	"golang.org/x/term"
 )
@@ -63,6 +61,8 @@ func (a App) Run(args []string) error {
 		return a.runConnect(args[1:])
 	case "tunnel":
 		return a.runTunnel(args[1:])
+	case "group":
+		return a.runGroup(args[1:])
 	case "edit":
 		return a.runEdit(args[1:])
 	case "remove":
@@ -79,7 +79,7 @@ func (a App) Run(args []string) error {
 }
 
 func (a App) runAdd(args []string) error {
-	const usage = "usage: shbx add [name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]"
+	const usage = "usage: shbx add [name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host] [--group group]"
 
 	name := ""
 	flagArgs := args
@@ -97,6 +97,7 @@ func (a App) runAdd(args []string) error {
 	portFlag := fs.Int("port", 0, "SSH port")
 	identityFileFlag := fs.String("identity-file", "", "SSH identity file")
 	identityFromFlag := fs.String("identity-from", "", "Reuse SSH identity file from another saved host")
+	groupFlag := fs.String("group", "", "Group name")
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return fmt.Errorf(usage)
@@ -166,6 +167,7 @@ func (a App) runAdd(args []string) error {
 	password := *passwordFlag
 	identityFile := strings.TrimSpace(*identityFileFlag)
 	identityFrom := strings.TrimSpace(*identityFromFlag)
+	group := strings.TrimSpace(*groupFlag)
 	port := *portFlag
 
 	if existed {
@@ -183,6 +185,9 @@ func (a App) runAdd(args []string) error {
 		}
 		if !flagWasSet(fs, "identity-file") {
 			identityFile = existingHost.IdentityFile
+		}
+		if !flagWasSet(fs, "group") {
+			group = existingHost.Group
 		}
 	}
 	if flagWasSet(fs, "identity-from") {
@@ -234,6 +239,12 @@ func (a App) runAdd(args []string) error {
 				return err
 			}
 		}
+		if group == "" {
+			group, err = promptGroup(reader, a.out, cfg.Groups, group)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	if interactive && existed && fs.NFlag() == 0 {
@@ -272,6 +283,10 @@ func (a App) runAdd(args []string) error {
 		if err != nil {
 			return err
 		}
+		group, err = promptGroup(reader, a.out, cfg.Groups, group)
+		if err != nil {
+			return err
+		}
 	}
 
 	if host == "" {
@@ -288,7 +303,9 @@ func (a App) runAdd(args []string) error {
 		Password:     password,
 		Port:         port,
 		IdentityFile: identityFile,
+		Group:        group,
 	}
+	ensureGroup(&cfg, group)
 
 	if err := config.Save(path, cfg); err != nil {
 		return err
@@ -323,10 +340,10 @@ func (a App) runList(args []string) error {
 		return nil
 	}
 
-	fmt.Fprintf(a.out, "%-16s %-28s %s\n", "NAME", "TARGET", "KEY")
+	fmt.Fprintf(a.out, "%-16s %-14s %-28s %s\n", "NAME", "GROUP", "TARGET", "KEY")
 	for _, name := range names {
 		host := cfg.Hosts[name]
-		fmt.Fprintf(a.out, "%-16s %-28s %s\n", name, formatListTarget(host), formatListKey(host))
+		fmt.Fprintf(a.out, "%-16s %-14s %-28s %s\n", name, optionalValue(host.Group), formatListTarget(host), formatListKey(host))
 	}
 	return nil
 }
@@ -366,6 +383,9 @@ func (a App) runShow(args []string) error {
 	}
 	if host.IdentityFile != "" {
 		fmt.Fprintf(a.out, "Identity file: %s\n", host.IdentityFile)
+	}
+	if host.Group != "" {
+		fmt.Fprintf(a.out, "Group: %s\n", host.Group)
 	}
 	return nil
 }
@@ -411,8 +431,6 @@ func (a App) runConnect(args []string) error {
 		return nil
 	}
 
-	_ = history.Append(name, time.Now())
-
 	fmt.Fprintf(a.out, "Connecting to %q (%s)...\n", name, formatListTarget(host))
 	var runErr error
 	if host.Password != "" {
@@ -456,7 +474,7 @@ func (a App) runTunnel(args []string) error {
 }
 
 func (a App) runTunnelAdd(args []string) error {
-	const usage = "usage: shbx tunnel add [name] --host <saved-host> (--local-port port --remote-host host --remote-port port | --dynamic-port port) [--type local|remote|dynamic] [--bind address]"
+	const usage = "usage: shbx tunnel add [name] --host <saved-host> (--local-port port --remote-host host --remote-port port | --dynamic-port port) [--type local|remote|dynamic] [--bind address] [--group group]"
 
 	name := ""
 	flagArgs := args
@@ -475,6 +493,7 @@ func (a App) runTunnelAdd(args []string) error {
 	dynamicPortFlag := fs.Int("dynamic-port", 0, "Local SOCKS port for dynamic forwarding")
 	remoteHostFlag := fs.String("remote-host", "", "Remote target host")
 	remotePortFlag := fs.Int("remote-port", 0, "Remote target/listen port")
+	groupFlag := fs.String("group", "", "Group name")
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return errors.New(usage)
@@ -525,6 +544,7 @@ func (a App) runTunnelAdd(args []string) error {
 		LocalPort:   *localPortFlag,
 		RemoteHost:  strings.TrimSpace(*remoteHostFlag),
 		RemotePort:  *remotePortFlag,
+		Group:       strings.TrimSpace(*groupFlag),
 	}
 	if *dynamicPortFlag != 0 {
 		if flagWasSet(fs, "local-port") {
@@ -537,7 +557,7 @@ func (a App) runTunnelAdd(args []string) error {
 		tunnel.Type = "local"
 	}
 	if interactive && fs.NFlag() == 0 {
-		tunnel, err = promptTunnel(reader, a.out, cfg.Hosts, tunnel)
+		tunnel, err = promptTunnel(reader, a.out, cfg.Hosts, cfg.Groups, tunnel)
 		if err != nil {
 			return err
 		}
@@ -548,6 +568,7 @@ func (a App) runTunnelAdd(args []string) error {
 	}
 
 	cfg.Tunnels[name] = tunnel
+	ensureGroup(&cfg, tunnel.Group)
 	if err := config.Save(path, cfg); err != nil {
 		return err
 	}
@@ -582,10 +603,10 @@ func (a App) runTunnelList(args []string) error {
 		return err
 	}
 
-	fmt.Fprintf(a.out, "%-16s %-9s %-12s %-16s %s\n", "NAME", "STATUS", "TYPE", "SSH HOST", "FORWARD")
+	fmt.Fprintf(a.out, "%-16s %-9s %-12s %-14s %-16s %s\n", "NAME", "STATUS", "TYPE", "GROUP", "SSH HOST", "FORWARD")
 	for _, name := range names {
 		tunnel := cfg.Tunnels[name]
-		fmt.Fprintf(a.out, "%-16s %-9s %-12s %-16s %s\n", name, formatTunnelStatus(state, name), tunnel.Type, tunnel.Host, formatTunnelForward(tunnel))
+		fmt.Fprintf(a.out, "%-16s %-9s %-12s %-14s %-16s %s\n", name, formatTunnelStatus(state, name), tunnel.Type, optionalValue(tunnel.Group), tunnel.Host, formatTunnelForward(tunnel))
 	}
 	return nil
 }
@@ -633,6 +654,9 @@ func (a App) runTunnelShow(args []string) error {
 	}
 	fmt.Fprintf(a.out, "Host: %s\n", tunnel.Host)
 	fmt.Fprintf(a.out, "Type: %s\n", tunnel.Type)
+	if tunnel.Group != "" {
+		fmt.Fprintf(a.out, "Group: %s\n", tunnel.Group)
+	}
 	fmt.Fprintf(a.out, "Forward: %s\n", formatTunnelForward(tunnel))
 	fmt.Fprintf(a.out, "Command: %s\n", tunnelCommandString(host, sshArgs))
 	return nil
@@ -821,9 +845,190 @@ func (a App) runTunnelRemove(args []string) error {
 	return nil
 }
 
+func (a App) runGroup(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: shbx group <add|list|show|remove|rename>")
+	}
+
+	switch args[0] {
+	case "add":
+		return a.runGroupAdd(args[1:])
+	case "list":
+		return a.runGroupList(args[1:])
+	case "show":
+		return a.runGroupShow(args[1:])
+	case "remove":
+		return a.runGroupRemove(args[1:])
+	case "rename":
+		return a.runGroupRename(args[1:])
+	default:
+		return fmt.Errorf("unknown group command %q; available: add, list, show, remove, rename", args[0])
+	}
+}
+
+func (a App) runGroupAdd(args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: shbx group add <name>")
+	}
+	name := strings.TrimSpace(args[0])
+	if name == "" {
+		return errors.New("group name cannot be empty")
+	}
+	path, _, err := config.Init()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if groupExists(cfg, name) {
+		return fmt.Errorf("group %q already exists", name)
+	}
+	ensureGroup(&cfg, name)
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "Added group %q\n", name)
+	return nil
+}
+
+func (a App) runGroupList(args []string) error {
+	if len(args) != 0 {
+		return errors.New("usage: shbx group list")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	names := groupNames(cfg)
+	if len(names) == 0 {
+		fmt.Fprintln(a.out, "No saved groups.")
+		return nil
+	}
+	fmt.Fprintf(a.out, "%-16s %-7s %s\n", "NAME", "HOSTS", "TUNNELS")
+	for _, name := range names {
+		hosts, tunnels := groupMembers(cfg, name)
+		fmt.Fprintf(a.out, "%-16s %-7d %d\n", name, len(hosts), len(tunnels))
+	}
+	return nil
+}
+
+func (a App) runGroupShow(args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: shbx group show <name>")
+	}
+	name := strings.TrimSpace(args[0])
+	if name == "" {
+		return errors.New("group name cannot be empty")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if !groupExists(cfg, name) {
+		return fmt.Errorf("group %q not found", name)
+	}
+	hosts, tunnels := groupMembers(cfg, name)
+	fmt.Fprintf(a.out, "Name: %s\n", name)
+	fmt.Fprintf(a.out, "Hosts: %s\n", joinOrDefault(hosts, "-"))
+	fmt.Fprintf(a.out, "Tunnels: %s\n", joinOrDefault(tunnels, "-"))
+	return nil
+}
+
+func (a App) runGroupRemove(args []string) error {
+	const usage = "usage: shbx group remove <name> [--yes|--force]"
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New(usage)
+	}
+	fs := flag.NewFlagSet("group remove", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	yesFlag := fs.Bool("yes", false, "Skip confirmation")
+	forceFlag := fs.Bool("force", false, "Clear group from members")
+	if err := fs.Parse(args[1:]); err != nil {
+		return errors.New(usage)
+	}
+	if fs.NArg() != 0 {
+		return errors.New(usage)
+	}
+	name := strings.TrimSpace(args[0])
+	if name == "" {
+		return errors.New("group name cannot be empty")
+	}
+	path, err := config.Path()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if !groupExists(cfg, name) {
+		return fmt.Errorf("group %q not found", name)
+	}
+	hosts, tunnels := groupMembers(cfg, name)
+	if len(hosts)+len(tunnels) > 0 && !*forceFlag {
+		return fmt.Errorf("group %q is not empty; pass --force to clear it from members", name)
+	}
+	if !*yesFlag && !*forceFlag {
+		if !isTerminalInput(a.in) {
+			return fmt.Errorf("confirmation required; pass --yes to remove group %q", name)
+		}
+		reader := bufio.NewReader(a.in)
+		remove, err := confirm(reader, a.out, fmt.Sprintf("Remove group %q?", name))
+		if err != nil {
+			return err
+		}
+		if !remove {
+			fmt.Fprintln(a.out, "Cancelled.")
+			return nil
+		}
+	}
+	clearGroup(&cfg, name)
+	delete(cfg.Groups, name)
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "Removed group %q\n", name)
+	return nil
+}
+
+func (a App) runGroupRename(args []string) error {
+	if len(args) != 2 {
+		return errors.New("usage: shbx group rename <old-name> <new-name>")
+	}
+	oldName := strings.TrimSpace(args[0])
+	newName := strings.TrimSpace(args[1])
+	if oldName == "" || newName == "" {
+		return errors.New("group name cannot be empty")
+	}
+	path, err := config.Path()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if !groupExists(cfg, oldName) {
+		return fmt.Errorf("group %q not found", oldName)
+	}
+	if groupExists(cfg, newName) {
+		return fmt.Errorf("group %q already exists", newName)
+	}
+	delete(cfg.Groups, oldName)
+	ensureGroup(&cfg, newName)
+	renameGroupMembers(&cfg, oldName, newName)
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "Renamed group %q as %q\n", oldName, newName)
+	return nil
+}
+
 func (a App) runEdit(args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]")
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host] [--group group]")
 	}
 
 	fs := flag.NewFlagSet("edit", flag.ContinueOnError)
@@ -836,13 +1041,14 @@ func (a App) runEdit(args []string) error {
 	portFlag := fs.Int("port", 0, "SSH port")
 	identityFileFlag := fs.String("identity-file", "", "SSH identity file")
 	identityFromFlag := fs.String("identity-from", "", "Reuse SSH identity file from another saved host")
+	groupFlag := fs.String("group", "", "Group name")
 
 	if err := fs.Parse(args[1:]); err != nil {
-		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]")
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host] [--group group]")
 	}
 
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host]")
+		return fmt.Errorf("usage: shbx edit <name> [--name new-name] [--host host] [--user user] [--password password] [--port port] [--identity-file path|--identity-from host] [--group group]")
 	}
 	if flagWasSet(fs, "identity-file") && flagWasSet(fs, "identity-from") {
 		return errors.New("--identity-file and --identity-from cannot be used together")
@@ -871,7 +1077,7 @@ func (a App) runEdit(args []string) error {
 
 	if fs.NFlag() == 0 {
 		if !isTerminalInput(a.in) {
-			return errors.New("missing edit options; pass at least one of --name, --host, --user, --password, --port, --identity-file")
+			return errors.New("missing edit options; pass at least one of --name, --host, --user, --password, --port, --identity-file, --group")
 		}
 
 		reader := bufio.NewReader(a.in)
@@ -923,6 +1129,12 @@ func (a App) runEdit(args []string) error {
 			return err
 		}
 		host.IdentityFile = identityFileText
+
+		groupText, err := promptGroup(reader, a.out, cfg.Groups, host.Group)
+		if err != nil {
+			return err
+		}
+		host.Group = groupText
 	} else {
 		if flagWasSet(fs, "name") {
 			newName = strings.TrimSpace(*newNameFlag)
@@ -949,6 +1161,9 @@ func (a App) runEdit(args []string) error {
 			}
 			host.IdentityFile = identityFile
 		}
+		if flagWasSet(fs, "group") {
+			host.Group = strings.TrimSpace(*groupFlag)
+		}
 	}
 
 	if newName == "" {
@@ -971,6 +1186,7 @@ func (a App) runEdit(args []string) error {
 		delete(cfg.Hosts, name)
 	}
 	cfg.Hosts[newName] = host
+	ensureGroup(&cfg, host.Group)
 	if err := config.Save(path, cfg); err != nil {
 		return err
 	}
@@ -1174,6 +1390,11 @@ func (a App) runComplete(args []string) error {
 		for _, name := range completeTunnelNames(prefix) {
 			fmt.Fprintln(a.out, name)
 		}
+	case "groups":
+		prefix := completePrefix(args[1:])
+		for _, name := range completeGroupNames(prefix) {
+			fmt.Fprintln(a.out, name)
+		}
 	}
 	return nil
 }
@@ -1191,6 +1412,7 @@ Commands:
   show <name>      Show saved host details
   connect <name>   Connect to saved host over SSH
   tunnel           Add, list, show, start, stop, or remove SSH tunnels
+  group            Add, list, show, rename, or remove groups
   edit <name>      Edit saved host
   remove <name>    Remove saved host
   ui               Open the interactive terminal UI (default)
@@ -1210,6 +1432,7 @@ Add options:
   --port <port>                SSH port, default 22
   --identity-file <path>       SSH private key path
   --identity-from <host>       Reuse private key path from saved host
+  --group <group>              Put host in a group
 
 Edit options:
   --name <name>                Rename saved host
@@ -1219,6 +1442,7 @@ Edit options:
   --port <port>                SSH port, 0 uses default 22
   --identity-file <path>       SSH private key path, empty clears
   --identity-from <host>       Reuse private key path from saved host
+  --group <group>              Set host group, empty clears
 
 Connect options:
   --dry-run                    Print SSH command without connecting
@@ -1238,6 +1462,15 @@ Tunnel behavior:
   start                         Starts SSH in the background and stores its PID
   stop                          Stops the running SSH tunnel
   password prompts              If SSH asks for a password, type it normally
+
+Groups:
+  shbx group add work
+  shbx add prod --host 192.0.2.10 --group work
+  shbx tunnel add db --host prod --local-port 5432 --remote-host 127.0.0.1 --remote-port 5432 --group work
+  shbx group list
+  shbx group show work
+  shbx group rename work prod
+  shbx group remove prod --force
 
 Remove options:
   --yes                        Remove without confirmation
@@ -1480,7 +1713,7 @@ func completePrefix(args []string) string {
 }
 
 func completeCommandNames(prefix string) []string {
-	commands := []string{"add", "list", "show", "connect", "tunnel", "edit", "remove", "ui", "completion", "config", "version", "help"}
+	commands := []string{"add", "list", "show", "connect", "tunnel", "group", "edit", "remove", "ui", "completion", "config", "version", "help"}
 	return filterSortedPrefix(commands, prefix)
 }
 
@@ -1508,6 +1741,14 @@ func completeTunnelNames(prefix string) []string {
 		names = append(names, name)
 	}
 	return filterSortedPrefix(names, prefix)
+}
+
+func completeGroupNames(prefix string) []string {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	return filterSortedPrefix(groupNames(cfg), prefix)
 }
 
 func filterSortedPrefix(values []string, prefix string) []string {
@@ -1550,6 +1791,16 @@ const bashCompletionScript = `_shbx_completion()
                 return 0
             fi
             ;;
+        group)
+            if [[ ${COMP_CWORD} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "add list show remove rename" -- "$cur") )
+                return 0
+            fi
+            if [[ ${COMP_CWORD} -eq 3 && ( "${COMP_WORDS[2]}" = "show" || "${COMP_WORDS[2]}" = "remove" || "${COMP_WORDS[2]}" = "rename" ) ]]; then
+                COMPREPLY=( $(compgen -W "$(shbx __complete groups -- "$cur")" -- "$cur") )
+                return 0
+            fi
+            ;;
         completion)
             if [[ ${COMP_CWORD} -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") )
@@ -1564,7 +1815,7 @@ complete -F _shbx_completion shbx
 const zshCompletionScript = `#compdef shbx
 
 _shbx() {
-  local -a commands hosts tunnels tunnel_commands shells
+  local -a commands hosts tunnels groups tunnel_commands group_commands shells
 
   if (( CURRENT == 2 )); then
     commands=("${(@f)$(shbx __complete commands -- "$words[CURRENT]")}")
@@ -1589,6 +1840,18 @@ _shbx() {
       if (( CURRENT == 4 )) && [[ "$words[3]" == (show|start|stop|remove) ]]; then
         tunnels=("${(@f)$(shbx __complete tunnels -- "$words[CURRENT]")}")
         _describe 'saved tunnels' tunnels
+        return
+      fi
+      ;;
+    group)
+      if (( CURRENT == 3 )); then
+        group_commands=(add list show remove rename)
+        _describe 'group commands' group_commands
+        return
+      fi
+      if (( CURRENT == 4 )) && [[ "$words[3]" == (show|remove|rename) ]]; then
+        groups=("${(@f)$(shbx __complete groups -- "$words[CURRENT]")}")
+        _describe 'saved groups' groups
         return
       fi
       ;;
@@ -1618,6 +1881,7 @@ end
 complete -c shbx -n '__shbx_needs_command' -a '(shbx __complete commands -- (commandline -ct))'
 complete -c shbx -n '__shbx_using_command connect; or __shbx_using_command show; or __shbx_using_command edit; or __shbx_using_command remove' -a '(shbx __complete hosts -- (commandline -ct))'
 complete -c shbx -n '__shbx_using_command tunnel' -a 'add list show start stop remove'
+complete -c shbx -n '__shbx_using_command group' -a 'add list show remove rename'
 complete -c shbx -n '__shbx_using_command completion' -a 'bash zsh fish'
 `
 
@@ -1871,6 +2135,106 @@ func formatTunnelStatus(state tunnelstate.State, name string) string {
 		return "stopped"
 	}
 	return "running"
+}
+
+func ensureGroup(cfg *config.Config, name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	if cfg.Groups == nil {
+		cfg.Groups = map[string]config.Group{}
+	}
+	cfg.Groups[name] = config.Group{Name: name}
+}
+
+func groupNames(cfg config.Config) []string {
+	seen := map[string]bool{}
+	for name := range cfg.Groups {
+		if strings.TrimSpace(name) != "" {
+			seen[name] = true
+		}
+	}
+	for _, host := range cfg.Hosts {
+		if strings.TrimSpace(host.Group) != "" {
+			seen[host.Group] = true
+		}
+	}
+	for _, tunnel := range cfg.Tunnels {
+		if strings.TrimSpace(tunnel.Group) != "" {
+			seen[tunnel.Group] = true
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func groupExists(cfg config.Config, name string) bool {
+	for _, existing := range groupNames(cfg) {
+		if existing == name {
+			return true
+		}
+	}
+	return false
+}
+
+func groupMembers(cfg config.Config, group string) ([]string, []string) {
+	hosts := make([]string, 0)
+	for name, host := range cfg.Hosts {
+		if host.Group == group {
+			hosts = append(hosts, name)
+		}
+	}
+	tunnels := make([]string, 0)
+	for name, tunnel := range cfg.Tunnels {
+		if tunnel.Group == group {
+			tunnels = append(tunnels, name)
+		}
+	}
+	sort.Strings(hosts)
+	sort.Strings(tunnels)
+	return hosts, tunnels
+}
+
+func clearGroup(cfg *config.Config, group string) {
+	for name, host := range cfg.Hosts {
+		if host.Group == group {
+			host.Group = ""
+			cfg.Hosts[name] = host
+		}
+	}
+	for name, tunnel := range cfg.Tunnels {
+		if tunnel.Group == group {
+			tunnel.Group = ""
+			cfg.Tunnels[name] = tunnel
+		}
+	}
+}
+
+func renameGroupMembers(cfg *config.Config, oldName, newName string) {
+	for name, host := range cfg.Hosts {
+		if host.Group == oldName {
+			host.Group = newName
+			cfg.Hosts[name] = host
+		}
+	}
+	for name, tunnel := range cfg.Tunnels {
+		if tunnel.Group == oldName {
+			tunnel.Group = newName
+			cfg.Tunnels[name] = tunnel
+		}
+	}
+}
+
+func joinOrDefault(values []string, fallback string) string {
+	if len(values) == 0 {
+		return fallback
+	}
+	return strings.Join(values, ", ")
 }
 
 type identityFileChoice struct {
@@ -2192,7 +2556,7 @@ func promptIdentityFile(reader *bufio.Reader, out io.Writer, hosts map[string]co
 	return text, nil
 }
 
-func promptTunnel(reader *bufio.Reader, out io.Writer, hosts map[string]config.Host, current config.Tunnel) (config.Tunnel, error) {
+func promptTunnel(reader *bufio.Reader, out io.Writer, hosts map[string]config.Host, groups map[string]config.Group, current config.Tunnel) (config.Tunnel, error) {
 	var err error
 
 	current.Host, err = promptSavedHost(reader, out, hosts, current.Host)
@@ -2249,7 +2613,40 @@ func promptTunnel(reader *bufio.Reader, out io.Writer, hosts map[string]config.H
 			return config.Tunnel{}, err
 		}
 	}
+	current.Group, err = promptGroup(reader, out, groups, current.Group)
+	if err != nil {
+		return config.Tunnel{}, err
+	}
 	return current, nil
+}
+
+func promptGroup(reader *bufio.Reader, out io.Writer, groups map[string]config.Group, current string) (string, error) {
+	names := make([]string, 0, len(groups))
+	for name := range groups {
+		if strings.TrimSpace(name) != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	if len(names) > 0 {
+		fmt.Fprintln(out, "Saved groups:")
+		for i, name := range names {
+			fmt.Fprintf(out, "  %d) %s\n", i+1, name)
+		}
+	}
+
+	label := "Group"
+	if len(names) > 0 {
+		label = "Group [number or name]"
+	}
+	text, err := promptWithDefault(reader, out, label, current)
+	if err != nil {
+		return "", err
+	}
+	if index, err := strconv.Atoi(text); err == nil && index >= 1 && index <= len(names) {
+		return names[index-1], nil
+	}
+	return strings.TrimSpace(text), nil
 }
 
 func promptSavedHost(reader *bufio.Reader, out io.Writer, hosts map[string]config.Host, current string) (string, error) {

@@ -64,6 +64,9 @@ func TestInitExistsAndLoad(t *testing.T) {
 	if len(cfg.Tunnels) != 0 {
 		t.Fatalf("Tunnels = %v, want empty", cfg.Tunnels)
 	}
+	if len(cfg.Groups) != 0 {
+		t.Fatalf("Groups = %v, want empty", cfg.Groups)
+	}
 
 	_, created, err = Init()
 	if err != nil {
@@ -89,7 +92,9 @@ func TestSaveAndLoadHosts(t *testing.T) {
 		Password:     "secret",
 		Port:         2222,
 		IdentityFile: "~/.ssh/id_ed25519",
+		Group:        "work",
 	}
+	cfg.Groups["work"] = Group{Name: "work"}
 
 	if err := Save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -101,6 +106,9 @@ func TestSaveAndLoadHosts(t *testing.T) {
 	}
 	if got.Hosts["prod"] != cfg.Hosts["prod"] {
 		t.Fatalf("loaded host = %+v, want %+v", got.Hosts["prod"], cfg.Hosts["prod"])
+	}
+	if got.Groups["work"] != cfg.Groups["work"] {
+		t.Fatalf("loaded group = %+v, want %+v", got.Groups["work"], cfg.Groups["work"])
 	}
 }
 
@@ -119,6 +127,7 @@ func TestSaveAndLoadTunnels(t *testing.T) {
 		LocalPort:  5432,
 		RemoteHost: "127.0.0.1",
 		RemotePort: 5432,
+		Group:      "work",
 	}
 
 	if err := Save(path, cfg); err != nil {

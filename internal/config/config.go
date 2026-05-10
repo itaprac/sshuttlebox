@@ -17,6 +17,7 @@ type Config struct {
 	Version int               `json:"version"`
 	Hosts   map[string]Host   `json:"hosts"`
 	Tunnels map[string]Tunnel `json:"tunnels"`
+	Groups  map[string]Group  `json:"groups,omitempty"`
 }
 
 type Host struct {
@@ -25,6 +26,7 @@ type Host struct {
 	Password     string `json:"password,omitempty"`
 	Port         int    `json:"port,omitempty"`
 	IdentityFile string `json:"identityFile,omitempty"`
+	Group        string `json:"group,omitempty"`
 }
 
 type Tunnel struct {
@@ -34,6 +36,11 @@ type Tunnel struct {
 	LocalPort   int    `json:"localPort,omitempty"`
 	RemoteHost  string `json:"remoteHost,omitempty"`
 	RemotePort  int    `json:"remotePort,omitempty"`
+	Group       string `json:"group,omitempty"`
+}
+
+type Group struct {
+	Name string `json:"name,omitempty"`
 }
 
 func Default() Config {
@@ -41,6 +48,7 @@ func Default() Config {
 		Version: 1,
 		Hosts:   map[string]Host{},
 		Tunnels: map[string]Tunnel{},
+		Groups:  map[string]Group{},
 	}
 }
 
@@ -112,6 +120,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Tunnels == nil {
 		cfg.Tunnels = map[string]Tunnel{}
+	}
+	if cfg.Groups == nil {
+		cfg.Groups = map[string]Group{}
 	}
 
 	return cfg, nil

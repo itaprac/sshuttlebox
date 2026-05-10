@@ -450,6 +450,49 @@ func TestTunnelValidationRequiresSavedHostAndPorts(t *testing.T) {
 	}
 }
 
+func TestGroupsCanContainHostsAndTunnels(t *testing.T) {
+	withTempHome(t)
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"group", "add", "work"}); err != nil {
+		t.Fatalf("group add: %v", err)
+	}
+	if err := app.Run([]string{"add", "prod", "--host", "prod.example", "--group", "work"}); err != nil {
+		t.Fatalf("add grouped host: %v", err)
+	}
+	if err := app.Run([]string{"tunnel", "add", "db", "--host", "prod", "--local-port", "5432", "--remote-host", "127.0.0.1", "--remote-port", "5432", "--group", "work"}); err != nil {
+		t.Fatalf("add grouped tunnel: %v", err)
+	}
+
+	assertHost(t, "prod", config.Host{Host: "prod.example", Group: "work"})
+	assertTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432, Group: "work"})
+
+	out.Reset()
+	if err := app.Run([]string{"group", "show", "work"}); err != nil {
+		t.Fatalf("group show: %v", err)
+	}
+	for _, want := range []string{"Name: work", "Hosts: prod", "Tunnels: db"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("group show missing %q in %q", want, out.String())
+		}
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"group", "rename", "work", "prod"}); err != nil {
+		t.Fatalf("group rename: %v", err)
+	}
+	assertHost(t, "prod", config.Host{Host: "prod.example", Group: "prod"})
+	assertTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432, Group: "prod"})
+
+	out.Reset()
+	if err := app.Run([]string{"group", "remove", "prod", "--force"}); err != nil {
+		t.Fatalf("group remove --force: %v", err)
+	}
+	assertHost(t, "prod", config.Host{Host: "prod.example"})
+	assertTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+}
+
 func TestCompletionListsMatchingHosts(t *testing.T) {
 	withTempHome(t)
 	addHost(t, "prod", config.Host{Host: "prod.example"})

@@ -14,7 +14,13 @@ coverage.out
 .DS_Store
 .idea/
 .vscode/
+.claude/
+.codex/
 
 # Local environment files
 .env
 .env.*
+
+# Local screenshots/artifacts
+CleanShot*.png
+AYBwm.png
