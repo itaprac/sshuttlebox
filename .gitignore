@@ -20,7 +20,3 @@ coverage.out
 # Local environment files
 .env
 .env.*
-
-# Local screenshots/artifacts
-CleanShot*.png
-AYBwm.png
