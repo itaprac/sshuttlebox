@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="sshuttlebox is a small terminal SSH host and tunnel manager."
+    >
+    <title>sshuttlebox</title>
+    <style>
+      :root {
+        --bg: #030406;
+        --panel: #050507;
+        --panel-soft: #0a0b10;
+        --border: #3a3a41;
+        --muted: #8a8a91;
+        --dim: #5f5f66;
+        --text: #f4f1ff;
+        --blue: #5f87ff;
+        --cyan: #5fafff;
+        --green: #00d787;
+        --violet: #5f5fff;
+        --purple: #875fff;
+        --lavender: #af87ff;
+        --pink: #ff87ff;
+        --shadow: rgba(135, 95, 255, 0.32);
+        --chrome: #101116;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        color-scheme: dark;
+        scroll-behavior: smooth;
+      }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 18% 28%, rgba(95, 95, 255, 0.14), transparent 28rem),
+          radial-gradient(circle at 58% 20%, rgba(255, 135, 255, 0.09), transparent 32rem),
+          linear-gradient(180deg, #050609 0%, var(--bg) 58%, #020203 100%);
+        font-family:
+          ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono",
+          Menlo, monospace;
+      }
+
+      body::before {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        content: "";
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+        background-size: 72px 72px;
+        mask-image: linear-gradient(to bottom, black, transparent 86%);
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .page {
+        width: min(100%, 1500px);
+        margin: 0 auto;
+      }
+
+      .site-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 2rem;
+        min-height: 76px;
+        padding: 0 2rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.85rem;
+        font-size: clamp(1.2rem, 2vw, 1.65rem);
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .brand svg,
+      .feature-icon svg,
+      .github-icon {
+        flex: 0 0 auto;
+      }
+
+      .brand-name,
+      .hero h1,
+      .feature h2 {
+        background: linear-gradient(90deg, var(--blue), var(--lavender), var(--pink));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        color: #f2efff;
+        font-size: 0.95rem;
+      }
+
+      .nav a {
+        opacity: 0.9;
+        transition: color 160ms ease, opacity 160ms ease;
+      }
+
+      .nav a:hover {
+        color: var(--pink);
+        opacity: 1;
+      }
+
+      main {
+        padding: 2.35rem 2rem 2.7rem;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(28rem, 0.78fr) minmax(38rem, 1.22fr);
+        align-items: center;
+        gap: clamp(2.2rem, 4vw, 4.6rem);
+        min-height: calc(100svh - 190px);
+      }
+
+      .hero-copy {
+        max-width: 42rem;
+      }
+
+      .eyebrow {
+        margin: 0 0 1.2rem;
+        color: var(--cyan);
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .hero h1 {
+        max-width: 12ch;
+        margin: 0;
+        font-size: clamp(3.3rem, 5vw, 5.35rem);
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        max-width: 34rem;
+        margin: 1.75rem 0 2rem;
+        color: #b8b4bd;
+        font-size: clamp(1.15rem, 2vw, 1.45rem);
+        line-height: 1.65;
+      }
+
+      .lead strong {
+        color: var(--violet);
+        font-weight: 800;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        align-items: center;
+      }
+
+      .install-command,
+      .github-link {
+        display: inline-flex;
+        align-items: center;
+        min-height: 3.35rem;
+        border-radius: 6px;
+        font-size: 0.94rem;
+        transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+      }
+
+      .install-command {
+        position: relative;
+        color: inherit;
+        cursor: pointer;
+        gap: 0.55rem;
+        max-width: 100%;
+        padding: 0 1rem;
+        border: 1px solid var(--lavender);
+        background: rgba(5, 5, 7, 0.84);
+        box-shadow: 0 0 0 1px rgba(95, 95, 255, 0.1), 0 0 26px var(--shadow);
+        white-space: nowrap;
+      }
+
+      .prompt {
+        color: var(--text);
+        font-size: 1.25rem;
+        font-weight: 800;
+      }
+
+      .install-command code {
+        overflow: hidden;
+        font-size: clamp(0.7rem, 1.05vw, 0.86rem);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .copy-status {
+        position: absolute;
+        top: calc(100% + 0.5rem);
+        right: 0.85rem;
+        z-index: 2;
+        min-width: max-content;
+        padding: 0.35rem 0.55rem;
+        color: var(--green);
+        border: 1px solid rgba(0, 215, 135, 0.34);
+        border-radius: 5px;
+        background: rgba(3, 4, 6, 0.92);
+        box-shadow: 0 0 22px rgba(0, 215, 135, 0.16);
+        font-size: 0.78rem;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(0.45rem) scale(0.96);
+      }
+
+      .install-command.copied .copy-status {
+        animation: copyToast 1.8s cubic-bezier(0.19, 1, 0.22, 1) both;
+      }
+
+      @keyframes copyToast {
+        0% {
+          opacity: 0;
+          transform: translateY(0.45rem) scale(0.96);
+        }
+
+        16%,
+        76% {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+
+        100% {
+          opacity: 0;
+          transform: translateY(-0.35rem) scale(0.98);
+        }
+      }
+
+      .github-link {
+        gap: 0.65rem;
+        padding: 0 1.05rem;
+        border: 1px solid var(--border);
+        background: rgba(10, 11, 16, 0.72);
+      }
+
+      .install-command:hover,
+      .github-link:hover {
+        border-color: var(--pink);
+        transform: translateY(-1px);
+        box-shadow: 0 0 30px rgba(255, 135, 255, 0.16);
+      }
+
+      .terminal {
+        width: 100%;
+        max-width: 53rem;
+        min-width: 0;
+        justify-self: end;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        background: var(--chrome);
+        box-shadow:
+          0 18px 58px rgba(0, 0, 0, 0.45),
+          0 0 0 1px rgba(255, 255, 255, 0.015);
+        font-size: clamp(0.68rem, 0.82vw, 0.82rem);
+        overflow: hidden;
+      }
+
+      .terminal-chrome {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        height: 2.25rem;
+        padding: 0 0.8rem;
+        color: var(--muted);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        background: linear-gradient(180deg, #15161c, #0c0d12);
+        font-size: 0.78rem;
+      }
+
+      .window-controls {
+        display: flex;
+        gap: 0.42rem;
+      }
+
+      .window-controls span {
+        width: 0.66rem;
+        height: 0.66rem;
+        border-radius: 999px;
+        background: var(--dim);
+      }
+
+      .window-controls span:nth-child(1) {
+        background: #ff5f87;
+      }
+
+      .window-controls span:nth-child(2) {
+        background: #ffd75f;
+      }
+
+      .window-controls span:nth-child(3) {
+        background: var(--green);
+      }
+
+      .terminal-titlebar {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .terminal-spacer {
+        width: 3.24rem;
+      }
+
+      .terminal-inner {
+        padding: clamp(1rem, 1.55vw, 1.22rem);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 24%),
+          var(--panel);
+      }
+
+      .terminal-banner {
+        display: flex;
+        align-items: flex-end;
+        gap: 1.2rem;
+        min-width: 0;
+        margin-bottom: 1.35rem;
+      }
+
+      .ascii {
+        margin: 0;
+        background: linear-gradient(90deg, var(--violet), var(--purple), var(--lavender), var(--pink));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        filter: drop-shadow(3px 3px 0 rgba(95, 95, 255, 0.44));
+        font-size: clamp(3.2rem, 5.2vw, 4.9rem);
+        font-weight: 900;
+        line-height: 0.78;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .version {
+        margin: 0 0 0.45rem;
+        color: #8787ff;
+        font-size: 0.85rem;
+        font-style: italic;
+        white-space: nowrap;
+      }
+
+      .terminal-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 0.96fr) minmax(0, 1.04fr);
+        gap: 1rem;
+      }
+
+      .term-panel {
+        min-width: 0;
+        min-height: 12.2rem;
+        padding: 0.8rem;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: #020203;
+        overflow: hidden;
+      }
+
+      .term-panel.focused {
+        border-color: var(--purple);
+        box-shadow: 0 0 0 1px rgba(135, 95, 255, 0.18);
+      }
+
+      .term-title {
+        margin-bottom: 0.78rem;
+        color: var(--blue);
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .focused .term-title {
+        color: var(--pink);
+      }
+
+      .term-line,
+      .detail-row,
+      .help-line,
+      .preview-line {
+        display: flex;
+        min-width: 0;
+        gap: 0.85rem;
+        color: #d8d5de;
+        line-height: 1.55;
+        white-space: nowrap;
+      }
+
+      .term-line {
+        justify-content: flex-start;
+        padding: 0 0.15rem;
+      }
+
+      .term-line.selected {
+        color: #ffffff;
+        background: var(--violet);
+      }
+
+      .group {
+        color: var(--lavender);
+        font-weight: 800;
+      }
+
+      .host-name,
+      .tunnel-name {
+        min-width: 5.9rem;
+      }
+
+      .target,
+      .tunnel-target,
+      .muted {
+        color: var(--muted);
+      }
+
+      .target,
+      .tunnel-target {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .running {
+        color: var(--green);
+      }
+
+      .details {
+        min-height: 10.4rem;
+        margin-top: 1rem;
+      }
+
+      .detail-name {
+        color: var(--violet);
+        font-weight: 800;
+      }
+
+      .detail-label {
+        min-width: 8.5rem;
+        color: var(--blue);
+      }
+
+      .detail-value {
+        color: #e8e5ed;
+      }
+
+      .preview-line {
+        margin-top: 1rem;
+        color: var(--dim);
+      }
+
+      .footer {
+        margin-top: 0.85rem;
+        color: var(--muted);
+        font-size: 0.88rem;
+        line-height: 1.55;
+      }
+
+      .features {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0;
+        margin-top: 2.6rem;
+        border-top: 0;
+      }
+
+      .feature {
+        display: grid;
+        grid-template-columns: 4.5rem 1fr;
+        gap: 1.2rem;
+        align-items: start;
+        min-height: 7.1rem;
+        padding: 0.45rem clamp(1.4rem, 3vw, 3.2rem);
+        border-right: 1px solid rgba(255, 255, 255, 0.18);
+      }
+
+      .feature:first-child {
+        padding-left: clamp(0rem, 2vw, 3rem);
+      }
+
+      .feature:last-child {
+        border-right: 0;
+        padding-right: 0;
+      }
+
+      .feature-icon {
+        display: grid;
+        place-items: center;
+        width: 3.3rem;
+        height: 3.3rem;
+        color: var(--lavender);
+        border: 2px solid var(--lavender);
+        border-radius: 6px;
+        box-shadow: inset 0 0 20px rgba(95, 95, 255, 0.12);
+      }
+
+      .feature h2 {
+        margin: 0 0 0.7rem;
+        font-size: clamp(1rem, 1.6vw, 1.25rem);
+        line-height: 1.25;
+      }
+
+      .feature p {
+        max-width: 26rem;
+        margin: 0;
+        color: #aaa6af;
+        line-height: 1.6;
+      }
+
+      @media (max-width: 1240px) {
+        .hero {
+          grid-template-columns: 1fr;
+          min-height: auto;
+        }
+
+        .hero-copy {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.78fr);
+          align-items: end;
+          gap: 1.5rem 2rem;
+          max-width: none;
+        }
+
+        .hero h1 {
+          max-width: 14ch;
+        }
+
+        .hero-copy .eyebrow,
+        .hero-copy h1 {
+          grid-column: 1;
+        }
+
+        .hero-copy .lead,
+        .hero-copy .actions {
+          grid-column: 2;
+        }
+
+        .terminal {
+          justify-self: center;
+          max-width: 54rem;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .site-header {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 1rem;
+          padding: 1.15rem;
+        }
+
+        .nav {
+          width: auto;
+          justify-content: flex-start;
+          gap: 1rem;
+          font-size: 0.86rem;
+        }
+
+        main {
+          padding: 1.7rem 1rem 2rem;
+        }
+
+        .hero h1 {
+          font-size: clamp(3rem, 16vw, 4.4rem);
+        }
+
+        .hero-copy,
+        .hero-copy .eyebrow,
+        .hero-copy h1,
+        .hero-copy .lead,
+        .hero-copy .actions {
+          display: block;
+        }
+
+        .lead {
+          font-size: 1rem;
+        }
+
+        .actions {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .install-command,
+        .github-link {
+          width: 100%;
+          justify-content: flex-start;
+        }
+
+        .install-command {
+          margin-bottom: 0.65rem;
+        }
+
+        .terminal {
+          margin-right: -1rem;
+          margin-left: -1rem;
+          max-width: none;
+          width: calc(100% + 2rem);
+          border-right: 0;
+          border-left: 0;
+          border-radius: 0;
+          background: transparent;
+          box-shadow: none;
+          overflow-x: auto;
+        }
+
+        .terminal-inner {
+          min-width: 41rem;
+          padding: 1rem;
+        }
+
+        .terminal-chrome {
+          border-radius: 0;
+        }
+
+        .copy-status {
+          right: 0.75rem;
+        }
+
+        .terminal-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .features {
+          grid-template-columns: 1fr;
+          gap: 1.35rem;
+          margin-top: 2rem;
+        }
+
+        .feature {
+          grid-template-columns: 3.5rem minmax(0, 1fr);
+          gap: 1rem;
+          min-height: auto;
+          width: min(100%, 36rem);
+          padding: 0;
+          border-right: 0;
+        }
+
+        .feature:first-child,
+        .feature:last-child {
+          padding-right: 0;
+          padding-left: 0;
+        }
+
+        .feature-icon {
+          width: 3.15rem;
+          height: 3.15rem;
+        }
+
+        .feature p {
+          max-width: 100%;
+          font-size: 0.95rem;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <a class="brand" href="#" aria-label="sshuttlebox home">
+          <svg width="38" height="38" viewBox="0 0 38 38" aria-hidden="true">
+            <path d="M19 3 33 11v16L19 35 5 27V11L19 3Z" fill="none" stroke="#875fff" stroke-width="3" stroke-linejoin="round"/>
+            <path d="M19 19 5 11m14 8 14-8M19 19v16" fill="none" stroke="#af87ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="brand-name">sshuttlebox</span>
+        </a>
+        <nav class="nav" aria-label="Primary navigation">
+          <a href="https://github.com/itaprac/sshuttlebox">GitHub</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="eyebrow">Terminal SSH manager</p>
+            <h1 id="hero-title">SSH hosts and tunnels, kept tidy.</h1>
+            <p class="lead">
+              Save hosts, group tunnels, preview commands, and jump in with
+              <strong>shbx</strong>.
+            </p>
+            <div class="actions" id="install">
+              <button
+                type="button"
+                class="install-command"
+                data-copy="go install github.com/itaprac/sshuttlebox/cmd/shbx@latest"
+                aria-label="Copy installation command"
+              >
+                <span class="prompt">&gt;</span>
+                <code>go install github.com/itaprac/sshuttlebox/cmd/shbx@latest</code>
+                <span class="copy-status" aria-live="polite">Copied to clipboard</span>
+              </button>
+              <a class="github-link" href="https://github.com/itaprac/sshuttlebox">
+                <svg class="github-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                  <path fill="currentColor" d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.16c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.8 1.3 3.49.99.11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.92 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23A11.5 11.5 0 0 1 12 6.86c1.02 0 2.04.14 3 .41 2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.6-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z"/>
+                </svg>
+                <span>View GitHub</span>
+              </a>
+            </div>
+          </div>
+
+          <div class="terminal" aria-label="sshuttlebox terminal UI preview">
+            <div class="terminal-chrome" aria-hidden="true">
+              <div class="window-controls">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <div class="terminal-titlebar">shbx ui - sshuttlebox</div>
+              <div class="terminal-spacer"></div>
+            </div>
+            <div class="terminal-inner">
+              <div class="terminal-banner">
+                <pre class="ascii" aria-hidden="true">SHBX</pre>
+                <p class="version">sshuttlebox 0.2.1</p>
+              </div>
+
+              <div class="terminal-grid">
+                <section class="term-panel focused" aria-labelledby="hosts-title">
+                  <div class="term-title" id="hosts-title">HOSTS</div>
+                  <div class="term-line group">▸ recent</div>
+                  <div class="term-line selected">
+                    <span class="host-name">&gt; web-prod</span>
+                    <span>deploy@203.0.113.21:22</span>
+                  </div>
+                  <div class="term-line">
+                    <span class="host-name">api-stage</span>
+                    <span class="target">ops@198.51.100.14:22</span>
+                  </div>
+                  <div class="term-line">
+                    <span class="host-name">cache-dev</span>
+                    <span class="target">dev@10.0.4.18:22</span>
+                  </div>
+                  <div class="term-line">
+                    <span class="host-name">bastion</span>
+                    <span class="target">ubuntu@192.0.2.8:22</span>
+                  </div>
+                  <br>
+                  <div class="term-line group">▸ all</div>
+                  <div class="term-line">
+                    <span class="host-name">db-prod</span>
+                    <span class="target">db@198.51.100.30:22</span>
+                  </div>
+                  <div class="term-line">
+                    <span class="host-name">monitoring</span>
+                    <span class="target">ops@198.51.100.40:22</span>
+                  </div>
+                </section>
+
+                <section class="term-panel" aria-labelledby="tunnels-title">
+                  <div class="term-title" id="tunnels-title">TUNNELS</div>
+                  <div class="term-line">
+                    <span class="tunnel-name">db-local</span>
+                    <span class="running">running</span>
+                    <span class="tunnel-target">localhost:5432 -&gt; 10.0.4.20:5432</span>
+                  </div>
+                  <div class="term-line">
+                    <span class="tunnel-name">redis</span>
+                    <span class="muted">stopped</span>
+                    <span class="tunnel-target">localhost:6379 -&gt; 10.0.4.21:6379</span>
+                  </div>
+                </section>
+              </div>
+
+              <section class="term-panel details" aria-labelledby="details-title">
+                <div class="term-title" id="details-title">DETAILS</div>
+                <div class="detail-name">web-prod</div>
+                <div class="detail-row">
+                  <span class="detail-label">Host:</span>
+                  <span class="detail-value">203.0.113.21</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">User:</span>
+                  <span class="detail-value">deploy</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Port:</span>
+                  <span class="detail-value">22</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Identity file:</span>
+                  <span class="detail-value">~/.ssh/work_key</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Password:</span>
+                  <span class="muted">not set</span>
+                </div>
+                <div class="preview-line">ssh -p 22 -i ~/.ssh/work_key deploy@203.0.113.21</div>
+              </section>
+
+              <footer class="footer">
+                <div>Ready.</div>
+                <div>enter/c connect • p print • a add • e edit • r remove • tab hosts/tunnels • / filter • ? help • q quit</div>
+              </footer>
+            </div>
+          </div>
+        </section>
+
+        <section class="features" id="features" aria-label="sshuttlebox features">
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                <rect x="5" y="6" width="22" height="20" rx="3" stroke="currentColor" stroke-width="2"/>
+                <path d="M5 14h22M11 10h2M18 10h2M11 20h2M18 20h2" stroke="#5fafff" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div>
+              <h2>Saved hosts</h2>
+              <p>Organize and label your SSH hosts. Quick to find, easy to connect.</p>
+            </div>
+          </article>
+
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                <path d="M23 6h5v5M28 6 18 16M9 26H4v-5M4 26l10-10" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M9 7c5.5 0 9 3.2 9 9s3.5 9 9 9" stroke="#5fafff" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div>
+              <h2>Port tunnels</h2>
+              <p>Local, remote, and SOCKS forwarding with status at a glance.</p>
+            </div>
+          </article>
+
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                <path d="m8 10 6 6-6 6M17 22h8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div>
+              <h2>Shell completion</h2>
+              <p>Faster typing with completions for hosts, tunnels, and commands.</p>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+    <script>
+      const installCommand = document.querySelector(".install-command");
+      let copyTimer;
+
+      installCommand?.addEventListener("click", async () => {
+        const command = installCommand.dataset.copy;
+
+        try {
+          await navigator.clipboard.writeText(command);
+        } catch {
+          // Keep the UI calm even if clipboard access is unavailable.
+        }
+
+        window.clearTimeout(copyTimer);
+        installCommand.classList.remove("copied");
+        void installCommand.offsetWidth;
+        installCommand.classList.add("copied");
+        copyTimer = window.setTimeout(() => {
+          installCommand.classList.remove("copied");
+        }, 1800);
+      });
+    </script>
+  </body>
+</html>
