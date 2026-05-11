@@ -1,35 +1,65 @@
+<div align="center">
+
 # sshuttlebox
 
-[![CI](https://github.com/itaprac/sshuttlebox/actions/workflows/ci.yml/badge.svg)](https://github.com/itaprac/sshuttlebox/actions/workflows/ci.yml)
+**A compact SSH host and tunnel manager for your terminal.**
 
-`sshuttlebox` is a compact SSH host and tunnel manager for the terminal. It
-stores named SSH targets locally and lets you connect through the short `shbx`
-command.
+Save SSH targets under short names, organize them into groups, manage local/remote/SOCKS tunnels, and connect with a single command — or browse everything from an interactive TUI.
+
+[![CI](https://github.com/itaprac/sshuttlebox/actions/workflows/ci.yml/badge.svg)](https://github.com/itaprac/sshuttlebox/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/itaprac/sshuttlebox)](https://github.com/itaprac/sshuttlebox/blob/main/go.mod)
+[![Go Reference](https://pkg.go.dev/badge/github.com/itaprac/sshuttlebox.svg)](https://pkg.go.dev/github.com/itaprac/sshuttlebox)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](#installation)
+
+</div>
 
 ```bash
 shbx add prod --host 192.0.2.10 --user deploy
 shbx connect prod
 ```
 
-## Why
+---
 
-SSH workflows often grow into long commands, copied notes, and repeated tunnel
-setup. `sshuttlebox` keeps hosts, groups, and tunnels in a local config file so
-you can reach common targets quickly from the command line or terminal UI.
+## Table of Contents
+
+- [Why sshuttlebox?](#why-sshuttlebox)
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+  - [Hosts](#hosts)
+  - [Tunnels](#tunnels)
+  - [Groups](#groups)
+- [Command Reference](#command-reference)
+- [Shell Completion](#shell-completion)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Why sshuttlebox?
+
+SSH workflows tend to grow into long commands, copied notes, and repeated tunnel
+setup. `sshuttlebox` keeps hosts, groups, and tunnels in a single local config
+file so you can reach common targets quickly — from the command line or from an
+interactive terminal UI.
 
 ## Features
 
-- Saved SSH hosts under short names
-- Interactive terminal UI
-- Local, remote, and SOCKS tunnels
-- Groups for hosts and tunnels
-- Shell completion for saved names
-- Dry-run command preview
-- Optional password-based login
+- **Saved hosts** — connect to any SSH target by a short name
+- **Interactive TUI** — browse, edit, and connect without remembering flags
+- **Tunnels** — local, remote, and SOCKS forwarding with start/stop lifecycle
+- **Groups** — organize related hosts and tunnels for quick filtering
+- **Shell completion** — bash, zsh, and fish for all saved names
+- **Dry-run preview** — see the underlying `ssh` command before connecting
+- **Password auth (optional)** — keys are preferred, but passwords are supported
 
 ## Installation
 
-Requires Go 1.22 or newer.
+> Requires **Go 1.22 or newer**. Supported on **macOS** and **Linux**.
+
+### Using `go install`
 
 ```bash
 go install github.com/itaprac/sshuttlebox/cmd/shbx@latest
@@ -41,11 +71,17 @@ Make sure your Go binary directory is in `PATH`:
 export PATH="$HOME/go/bin:$PATH"
 ```
 
-Supported platforms: macOS and Linux.
+### From source
+
+```bash
+git clone https://github.com/itaprac/sshuttlebox.git
+cd sshuttlebox
+go build -o shbx ./cmd/shbx
+```
 
 ## Quick Start
 
-Create the local config file, add a host, and connect:
+Initialize the local config, add a host, and connect:
 
 ```bash
 shbx config init
@@ -53,21 +89,33 @@ shbx add prod --host 192.0.2.10 --user deploy --identity-file ~/.ssh/id_ed25519
 shbx connect prod
 ```
 
-Open the terminal UI:
+Open the interactive terminal UI:
 
 ```bash
 shbx
 ```
 
-Preview the SSH command without connecting:
+Preview the underlying SSH command without connecting:
 
 ```bash
 shbx connect prod --dry-run
 ```
 
-## Tunnels
+## Usage
 
-Add and start a local port-forwarding tunnel through a saved host:
+### Hosts
+
+```bash
+shbx add staging --host 198.51.100.5 --user deploy --port 2222
+shbx list
+shbx show staging
+shbx edit staging
+shbx remove staging
+```
+
+### Tunnels
+
+Add and start a **local** port-forwarding tunnel through a saved host:
 
 ```bash
 shbx tunnel add db --host prod --local-port 5432 --remote-host 127.0.0.1 --remote-port 5432
@@ -75,16 +123,16 @@ shbx tunnel start db
 shbx tunnel stop db
 ```
 
-Add and start a SOCKS tunnel:
+Add and start a **SOCKS** (dynamic) tunnel:
 
 ```bash
 shbx tunnel add socks --host prod --dynamic-port 1080
 shbx tunnel start socks
 ```
 
-## Groups
+### Groups
 
-Group related hosts and tunnels:
+Group related hosts and tunnels for easier navigation:
 
 ```bash
 shbx group add work
@@ -110,7 +158,7 @@ shbx group show work
 | `shbx version` | Print the installed version |
 | `shbx help` | Show the full command reference |
 
-Run the built-in help for all options and examples:
+For full options and examples, run:
 
 ```bash
 shbx help
@@ -124,21 +172,21 @@ Install completion for your current shell:
 shbx completion install
 ```
 
-Install completion files for bash, zsh, and fish:
+Install completion for bash, zsh, and fish at once:
 
 ```bash
 shbx completion install --shell all
 ```
 
-Completion files are installed in user-level paths:
+Completion files are written to user-level paths:
 
-```text
-bash: ~/.local/share/shbx/completions/bash/shbx
-zsh:  ~/.local/share/shbx/completions/zsh/_shbx
-fish: ~/.config/fish/completions/shbx.fish
-```
+| Shell | Path |
+| --- | --- |
+| bash | `~/.local/share/shbx/completions/bash/shbx` |
+| zsh  | `~/.local/share/shbx/completions/zsh/_shbx` |
+| fish | `~/.config/fish/completions/shbx.fish` |
 
-You can also print a completion script:
+You can also print a completion script to stdout:
 
 ```bash
 shbx completion bash
@@ -148,7 +196,7 @@ shbx completion fish
 
 ## Configuration
 
-Hosts, tunnels, and groups are stored in:
+Hosts, tunnels, and groups are stored in a single JSON file:
 
 ```text
 ~/.config/sshuttlebox/config.json
@@ -157,21 +205,31 @@ Hosts, tunnels, and groups are stored in:
 Useful config commands:
 
 ```bash
-shbx config path
-shbx config status
+shbx config path     # print the config file path
+shbx config status   # show config health and counts
 ```
 
-Saved passwords are stored in the local config file. Prefer SSH keys when
-possible.
+> **Note on credentials:** saved passwords are stored in the local config file.
+> Prefer SSH keys whenever possible.
 
 ## Development
 
 ```bash
+# Run the full test suite
 go test ./...
+
+# Run the CLI directly from source
 go run ./cmd/shbx help
+
+# Build a local binary
 go build -o shbx ./cmd/shbx
 ```
 
+## Contributing
+
+Contributions are welcome. Please open an issue to discuss substantial changes
+before submitting a pull request.
+
 ## License
 
-MIT
+Released under the [MIT License](LICENSE).
