@@ -120,10 +120,22 @@
         display: inline-flex;
         align-items: center;
         gap: 0.5rem;
-        transition: color 160ms ease;
+        padding: 0.2rem 0.45rem;
+        margin-right: 0.25rem;
+        border-radius: 6px;
+        transition: color 160ms ease, background-color 160ms ease;
       }
-      .nav-gh svg { display: block; }
-      .nav-gh:hover { color: var(--pink); }
+      .nav-gh svg {
+        display: block;
+        flex: none;
+        width: 20px;
+        height: 20px;
+        overflow: visible;
+      }
+      .nav-gh:hover {
+        color: var(--pink);
+        background-color: rgba(255, 255, 255, 0.04);
+      }
 
       main { padding: 3rem 0 4.5rem; }
 
@@ -217,31 +229,84 @@
           "Liberation Mono", Menlo, monospace;
         font-size: 0.95rem;
       }
-      .install .ico { margin-left: 0.35rem; color: var(--muted); font-size: 1.1rem; }
+      .install .ico {
+        position: relative;
+        display: inline-grid;
+        place-items: center;
+        width: 1.15em;
+        height: 1.15em;
+        margin-left: 0.35rem;
+        color: var(--muted);
+        font-size: 1.1rem;
+        line-height: 1;
+      }
+      .install .ico > span {
+        grid-area: 1 / 1;
+        display: inline-block;
+        transition:
+          opacity 360ms cubic-bezier(0.4, 0, 0.2, 1),
+          transform 520ms cubic-bezier(0.4, 0, 0.2, 1);
+        will-change: opacity, transform;
+      }
+      .install .ico-check {
+        color: var(--green);
+        opacity: 0;
+        transform: scale(0.7);
+      }
+      .install.copied .ico-clip {
+        opacity: 0;
+        transform: scale(0.7);
+      }
+      .install.copied .ico-check {
+        opacity: 1;
+        transform: scale(1);
+      }
+
       .copy-status {
         position: absolute;
         bottom: calc(100% + 0.55rem);
         right: 0.25rem;
-        padding: 0.35rem 0.65rem;
-        border-radius: 6px;
-        background: rgba(3, 4, 6, 0.95);
-        border: 1px solid rgba(0, 215, 135, 0.36);
-        box-shadow: 0 6px 24px rgba(0, 215, 135, 0.18);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.4rem 0.75rem;
+        border-radius: 8px;
+        background: rgba(3, 4, 6, 0.96);
+        border: 1px solid rgba(0, 215, 135, 0.3);
+        box-shadow: 0 8px 24px rgba(0, 215, 135, 0.16);
         color: var(--green);
-        font-size: 0.76rem;
+        font-size: 0.78rem;
         font-weight: 600;
         letter-spacing: 0.01em;
         white-space: nowrap;
         opacity: 0;
-        transform: translateY(6px) scale(0.94);
-        transition:
-          opacity 260ms ease,
-          transform 320ms cubic-bezier(0.22, 1.4, 0.36, 1);
+        transform: translateY(4px);
         pointer-events: none;
+        will-change: opacity, transform;
+      }
+      .copy-status::before {
+        content: "✓";
+        font-size: 0.82rem;
+        line-height: 1;
+        color: var(--green);
       }
       .install.copied .copy-status {
-        opacity: 1;
-        transform: translateY(0) scale(1);
+        animation: copyFade 2400ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+      }
+      @keyframes copyFade {
+        0%   { opacity: 0; transform: translateY(6px); }
+        22%  { opacity: 1; transform: translateY(0); }
+        78%  { opacity: 1; transform: translateY(0); }
+        100% { opacity: 0; transform: translateY(-4px); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .install .ico > span,
+        .install .copy-status {
+          transition: opacity 140ms ease !important;
+          animation: none !important;
+        }
+        .install.copied .copy-status { opacity: 1; transform: none; }
       }
 
       /* --- terminal card --- */
@@ -599,8 +664,8 @@
         <nav class="nav" aria-label="Primary">
           <a class="nav-gh" href="https://github.com/itaprac/sshuttlebox">
             <span>GitHub</span>
-            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-              <path fill="currentColor" d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.16c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.8 1.3 3.49.99.11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.92 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23A11.5 11.5 0 0 1 12 6.86c1.02 0 2.04.14 3 .41 2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.6-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z"/>
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
             </svg>
           </a>
         </nav>
@@ -624,7 +689,10 @@
               >
                 <span class="prompt">$</span>
                 <code>go install github.com/itaprac/sshuttlebox/cmd/shbx@latest</code>
-                <span class="ico" aria-hidden="true">⎘</span>
+                <span class="ico" aria-hidden="true">
+                  <span class="ico-clip">⎘</span>
+                  <span class="ico-check">✓</span>
+                </span>
                 <span class="copy-status" aria-live="polite">Copied!</span>
               </button>
             </div>
@@ -768,7 +836,7 @@
         btn.classList.remove("copied");
         void btn.offsetWidth;
         btn.classList.add("copied");
-        t = setTimeout(() => btn.classList.remove("copied"), 1700);
+        t = setTimeout(() => btn.classList.remove("copied"), 2400);
       });
     </script>
   </body>
