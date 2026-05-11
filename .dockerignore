@@ -1,0 +1,16 @@
+.git
+.claude
+dist
+build
+node_modules
+*.log
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+!docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.jpeg
+!docs/**/*.gif
+!docs/**/*.webp
