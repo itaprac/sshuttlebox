@@ -464,6 +464,50 @@ func TestTUIPreviewDoesNotRenderGlobalHelpOrDuplicateQuit(t *testing.T) {
 	}
 }
 
+func TestTUICommandPaletteRunsActions(t *testing.T) {
+	withTempHome(t)
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"prod": {Host: "prod.example"},
+		},
+	}, nil)
+
+	updated, _ := model.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	model = updated.(tuiModel)
+	if model.screen != tuiScreenPalette {
+		t.Fatalf("screen = %v, want command palette", model.screen)
+	}
+	view := model.View()
+	for _, want := range []string{"Command palette", "Connect host", "Run doctor"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("palette view missing %q in %q", want, view)
+		}
+	}
+
+	for i, item := range model.palette {
+		if item.action == tuiPaletteDoctor {
+			model.paletteCursor = i
+			break
+		}
+	}
+	updated, _ = model.updatePalette(keyMsg(tea.KeyEnter))
+	model = updated.(tuiModel)
+	if model.screen != tuiScreenPreview {
+		t.Fatalf("screen = %v, want preview", model.screen)
+	}
+	if model.outputTitle != "Doctor" {
+		t.Fatalf("outputTitle = %q, want Doctor", model.outputTitle)
+	}
+	if !strings.Contains(model.status, "sshuttlebox doctor") {
+		t.Fatalf("doctor output missing from status %q", model.status)
+	}
+	view = model.View()
+	if !strings.Contains(view, "sshuttlebox doctor") || !strings.Contains(view, "\n[WARN] config file missing") {
+		t.Fatalf("doctor preview should preserve report lines: %q", view)
+	}
+}
+
 func TestUIHelpAndCompletionMentionCommand(t *testing.T) {
 	var out strings.Builder
 	app := App{in: strings.NewReader(""), out: &out}
@@ -473,6 +517,9 @@ func TestUIHelpAndCompletionMentionCommand(t *testing.T) {
 	if !strings.Contains(out.String(), "ui               Open the interactive terminal UI") {
 		t.Fatalf("help missing ui command in %q", out.String())
 	}
+	if !strings.Contains(out.String(), "doctor           Check config, SSH, keys, and tunnels") {
+		t.Fatalf("help missing doctor command in %q", out.String())
+	}
 
 	out.Reset()
 	if err := app.Run([]string{"__complete", "commands", "--", "u"}); err != nil {
@@ -480,6 +527,14 @@ func TestUIHelpAndCompletionMentionCommand(t *testing.T) {
 	}
 	if out.String() != "ui\n" {
 		t.Fatalf("completion output = %q, want ui", out.String())
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"__complete", "commands", "--", "d"}); err != nil {
+		t.Fatalf("complete commands: %v", err)
+	}
+	if out.String() != "doctor\n" {
+		t.Fatalf("completion output = %q, want doctor", out.String())
 	}
 }
 

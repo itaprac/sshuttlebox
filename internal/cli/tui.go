@@ -25,6 +25,7 @@ const (
 	tuiScreenTunnelForm
 	tuiScreenRemove
 	tuiScreenPreview
+	tuiScreenPalette
 	tuiScreenKeySelect
 	tuiScreenHostSelect
 	tuiScreenGroupSelect
@@ -72,6 +73,26 @@ type tuiTunnelItem struct {
 	group  string
 }
 
+type tuiPaletteAction int
+
+const (
+	tuiPaletteConnect tuiPaletteAction = iota
+	tuiPalettePreview
+	tuiPaletteAddHost
+	tuiPaletteAddTunnel
+	tuiPaletteEdit
+	tuiPaletteRemove
+	tuiPaletteSwitch
+	tuiPaletteFilter
+	tuiPaletteDoctor
+)
+
+type tuiPaletteItem struct {
+	title  string
+	hint   string
+	action tuiPaletteAction
+}
+
 type tuiModel struct {
 	path         string
 	cfg          config.Config
@@ -87,6 +108,7 @@ type tuiModel struct {
 	err          error
 	connectName  string
 	tunnelName   string
+	outputTitle  string
 
 	filter        textinput.Model
 	inputs        []textinput.Model
@@ -101,6 +123,8 @@ type tuiModel struct {
 	groupCursor   int
 	groupReturn   tuiScreen
 	groupField    int
+	palette       []tuiPaletteItem
+	paletteCursor int
 	help          help.Model
 	keys          tuiKeyMap
 }
@@ -115,6 +139,7 @@ type tuiKeyMap struct {
 	Remove    key.Binding
 	Switch    key.Binding
 	Filter    key.Binding
+	Palette   key.Binding
 	ReuseKey  key.Binding
 	PickHost  key.Binding
 	PickGroup key.Binding
@@ -135,6 +160,7 @@ func newTUIKeyMap() tuiKeyMap {
 		Remove:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "remove")),
 		Switch:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "hosts/tunnels")),
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		Palette:   key.NewBinding(key.WithKeys(":", "ctrl+p"), key.WithHelp(":", "commands")),
 		ReuseKey:  key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "reuse key")),
 		PickHost:  key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "pick host")),
 		PickGroup: key.NewBinding(key.WithKeys("ctrl+g"), key.WithHelp("ctrl+g", "pick group")),
@@ -146,13 +172,13 @@ func newTUIKeyMap() tuiKeyMap {
 }
 
 func (k tuiKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Connect, k.Preview, k.Add, k.Edit, k.Remove, k.Switch, k.Filter, k.Help, k.Quit}
+	return []key.Binding{k.Connect, k.Preview, k.Add, k.Edit, k.Remove, k.Switch, k.Filter, k.Palette, k.Help, k.Quit}
 }
 
 func (k tuiKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Connect, k.Preview},
-		{k.Add, k.Edit, k.Remove, k.Switch, k.Filter},
+		{k.Add, k.Edit, k.Remove, k.Switch, k.Filter, k.Palette},
 		{k.ReuseKey, k.PickHost, k.PickGroup, k.Save, k.Cancel, k.Help, k.Quit},
 	}
 }
@@ -268,6 +294,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateRemove(msg)
 		case tuiScreenPreview:
 			return m.updatePreview(msg)
+		case tuiScreenPalette:
+			return m.updatePalette(msg)
 		case tuiScreenKeySelect:
 			return m.updateKeySelect(msg)
 		case tuiScreenHostSelect:
@@ -310,6 +338,8 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.toggleMode()
 	case key.Matches(msg, m.keys.Filter):
 		return m.focusFilter()
+	case key.Matches(msg, m.keys.Palette):
+		return m.openPalette()
 	case key.Matches(msg, m.keys.Up):
 		if m.mode == tuiModeTunnels && m.tunnelCursor > 0 {
 			m.tunnelCursor--
@@ -369,6 +399,7 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.status = tunnelCommandString(host, sshArgs)
 			m.err = nil
+			m.outputTitle = "Tunnel command"
 			m.screen = tuiScreenPreview
 			return m, nil
 		}
@@ -379,6 +410,7 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.status = connectCommandString(item.host, buildSSHArgs(item.host))
 		m.err = nil
+		m.outputTitle = "SSH command"
 		m.screen = tuiScreenPreview
 	case key.Matches(msg, m.keys.Add):
 		if m.mode == tuiModeTunnels {
@@ -680,6 +712,36 @@ func (m tuiModel) updatePreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Cancel), key.Matches(msg, m.keys.Preview):
 		m.screen = tuiScreenMain
+		m.outputTitle = ""
+	}
+	return m, nil
+}
+
+func (m tuiModel) updatePalette(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Cancel), key.Matches(msg, m.keys.Palette):
+		m.screen = tuiScreenMain
+		m.palette = nil
+		m.status = "Cancelled."
+		m.err = nil
+		return m, nil
+	case key.Matches(msg, m.keys.Up):
+		if m.paletteCursor > 0 {
+			m.paletteCursor--
+		}
+	case key.Matches(msg, m.keys.Down):
+		if m.paletteCursor < len(m.palette)-1 {
+			m.paletteCursor++
+		}
+	case key.Matches(msg, m.keys.Connect), msg.String() == "enter":
+		if len(m.palette) == 0 || m.paletteCursor < 0 || m.paletteCursor >= len(m.palette) {
+			m.screen = tuiScreenMain
+			m.setError(errors.New("no command selected"))
+			return m, nil
+		}
+		return m.runPaletteAction(m.palette[m.paletteCursor].action)
 	}
 	return m, nil
 }
@@ -699,6 +761,8 @@ func (m tuiModel) View() string {
 		body = m.removeView()
 	case tuiScreenPreview:
 		body = m.previewView()
+	case tuiScreenPalette:
+		body = m.paletteView()
 	case tuiScreenKeySelect:
 		body = m.keySelectView()
 	case tuiScreenHostSelect:
@@ -1185,6 +1249,30 @@ func (m tuiModel) groupSelectView() string {
 	return strings.Join(lines, "\n")
 }
 
+func (m tuiModel) paletteView() string {
+	width := maxInt(56, minInt(84, m.width-4))
+	if m.width == 0 {
+		width = 72
+	}
+
+	lines := []string{titleStyle.Render("Command palette"), ""}
+	if len(m.palette) == 0 {
+		lines = append(lines, mutedStyle.Render("No actions available."))
+	} else {
+		for i, item := range m.palette {
+			if i == m.paletteCursor {
+				line := paletteItemLabel(item, width-2, selectedTargetStyle)
+				lines = append(lines, selectedStyle.Render(fitRow("> "+line, width)))
+			} else {
+				line := paletteItemLabel(item, width-2, mutedStyle)
+				lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
+			}
+		}
+	}
+	lines = append(lines, "", mutedStyle.Render("up/down: select  enter: run  esc: back"))
+	return strings.Join(lines, "\n")
+}
+
 func (m tuiModel) removeView() string {
 	if m.mode == tuiModeTunnels {
 		item, ok := m.selectedTunnelItem()
@@ -1206,9 +1294,12 @@ func (m tuiModel) removeView() string {
 }
 
 func (m tuiModel) previewView() string {
-	title := "SSH command"
-	if m.mode == tuiModeTunnels {
-		title = "Tunnel command"
+	title := m.outputTitle
+	if title == "" {
+		title = "SSH command"
+		if m.mode == tuiModeTunnels {
+			title = "Tunnel command"
+		}
 	}
 	width := maxInt(32, m.width-8)
 	if m.width == 0 {
@@ -1382,6 +1473,182 @@ func (m tuiModel) focusFilter() (tea.Model, tea.Cmd) {
 	}
 	m.err = nil
 	return m, cmd
+}
+
+func (m tuiModel) runSelectedConnect() (tea.Model, tea.Cmd) {
+	if m.mode == tuiModeTunnels {
+		item, ok := m.selectedTunnelItem()
+		if !ok {
+			m.screen = tuiScreenMain
+			m.setError(errors.New("no tunnel selected"))
+			return m, nil
+		}
+		if _, running, err := tunnelstate.Get(item.name); err != nil {
+			m.screen = tuiScreenMain
+			m.setError(err)
+			return m, nil
+		} else if !running {
+			if host, ok := m.cfg.Hosts[item.tunnel.Host]; ok && host.Password == "" {
+				m.tunnelName = item.name
+				return m, tea.Quit
+			}
+		}
+		if err := m.toggleTunnel(item.name, item.tunnel); err != nil {
+			m.screen = tuiScreenMain
+			m.setError(err)
+		}
+		m.screen = tuiScreenMain
+		return m, nil
+	}
+
+	item, ok := m.selectedItem()
+	if !ok {
+		m.screen = tuiScreenMain
+		m.setError(errors.New("no host selected"))
+		return m, nil
+	}
+	m.connectName = item.name
+	return m, tea.Quit
+}
+
+func (m tuiModel) runSelectedPreview() (tea.Model, tea.Cmd) {
+	if m.mode == tuiModeTunnels {
+		item, ok := m.selectedTunnelItem()
+		if !ok {
+			m.screen = tuiScreenMain
+			m.setError(errors.New("no tunnel selected"))
+			return m, nil
+		}
+		host, ok := m.cfg.Hosts[item.tunnel.Host]
+		if !ok {
+			m.screen = tuiScreenMain
+			m.setError(fmt.Errorf("host %q for tunnel %q not found", item.tunnel.Host, item.name))
+			return m, nil
+		}
+		sshArgs, err := buildTunnelStartSSHArgs(item.name, host, item.tunnel)
+		if err != nil {
+			m.screen = tuiScreenMain
+			m.setError(err)
+			return m, nil
+		}
+		m.status = tunnelCommandString(host, sshArgs)
+		m.outputTitle = "Tunnel command"
+		m.err = nil
+		m.screen = tuiScreenPreview
+		return m, nil
+	}
+
+	item, ok := m.selectedItem()
+	if !ok {
+		m.screen = tuiScreenMain
+		m.setError(errors.New("no host selected"))
+		return m, nil
+	}
+	m.status = connectCommandString(item.host, buildSSHArgs(item.host))
+	m.outputTitle = "SSH command"
+	m.err = nil
+	m.screen = tuiScreenPreview
+	return m, nil
+}
+
+func (m tuiModel) openPalette() (tea.Model, tea.Cmd) {
+	m.palette = m.paletteItems()
+	m.paletteCursor = 0
+	m.screen = tuiScreenPalette
+	m.status = ""
+	m.err = nil
+	return m, nil
+}
+
+func (m tuiModel) paletteItems() []tuiPaletteItem {
+	items := make([]tuiPaletteItem, 0, 10)
+	if m.mode == tuiModeTunnels {
+		if item, ok := m.selectedTunnelItem(); ok {
+			items = append(items,
+				tuiPaletteItem{title: "Start/stop tunnel", hint: item.name, action: tuiPaletteConnect},
+				tuiPaletteItem{title: "Print tunnel command", hint: item.name, action: tuiPalettePreview},
+				tuiPaletteItem{title: "Edit tunnel", hint: item.name, action: tuiPaletteEdit},
+				tuiPaletteItem{title: "Remove tunnel", hint: item.name, action: tuiPaletteRemove},
+			)
+		}
+		items = append(items,
+			tuiPaletteItem{title: "Add tunnel", hint: "new tunnel", action: tuiPaletteAddTunnel},
+			tuiPaletteItem{title: "Add host", hint: "new host", action: tuiPaletteAddHost},
+			tuiPaletteItem{title: "Switch to hosts", hint: "tab", action: tuiPaletteSwitch},
+			tuiPaletteItem{title: "Filter tunnels", hint: "/", action: tuiPaletteFilter},
+			tuiPaletteItem{title: "Run doctor", hint: "diagnostics", action: tuiPaletteDoctor},
+		)
+		return items
+	}
+
+	if item, ok := m.selectedItem(); ok {
+		items = append(items,
+			tuiPaletteItem{title: "Connect host", hint: item.name, action: tuiPaletteConnect},
+			tuiPaletteItem{title: "Print SSH command", hint: item.name, action: tuiPalettePreview},
+			tuiPaletteItem{title: "Edit host", hint: item.name, action: tuiPaletteEdit},
+			tuiPaletteItem{title: "Remove host", hint: item.name, action: tuiPaletteRemove},
+		)
+	}
+	items = append(items,
+		tuiPaletteItem{title: "Add host", hint: "new host", action: tuiPaletteAddHost},
+		tuiPaletteItem{title: "Add tunnel", hint: "new tunnel", action: tuiPaletteAddTunnel},
+		tuiPaletteItem{title: "Switch to tunnels", hint: "tab", action: tuiPaletteSwitch},
+		tuiPaletteItem{title: "Filter hosts", hint: "/", action: tuiPaletteFilter},
+		tuiPaletteItem{title: "Run doctor", hint: "diagnostics", action: tuiPaletteDoctor},
+	)
+	return items
+}
+
+func (m tuiModel) runPaletteAction(action tuiPaletteAction) (tea.Model, tea.Cmd) {
+	m.palette = nil
+	switch action {
+	case tuiPaletteConnect:
+		return m.runSelectedConnect()
+	case tuiPalettePreview:
+		return m.runSelectedPreview()
+	case tuiPaletteAddHost:
+		return m.openForm("", config.Host{})
+	case tuiPaletteAddTunnel:
+		return m.openTunnelForm("", config.Tunnel{Type: "local"})
+	case tuiPaletteEdit:
+		if m.mode == tuiModeTunnels {
+			item, ok := m.selectedTunnelItem()
+			if !ok {
+				m.screen = tuiScreenMain
+				m.setError(errors.New("no tunnel selected"))
+				return m, nil
+			}
+			return m.openTunnelForm(item.name, item.tunnel)
+		}
+		item, ok := m.selectedItem()
+		if !ok {
+			m.screen = tuiScreenMain
+			m.setError(errors.New("no host selected"))
+			return m, nil
+		}
+		return m.openForm(item.name, item.host)
+	case tuiPaletteRemove:
+		m.screen = tuiScreenRemove
+		m.status = ""
+		m.err = nil
+		return m, nil
+	case tuiPaletteSwitch:
+		m.screen = tuiScreenMain
+		m.toggleMode()
+		return m, nil
+	case tuiPaletteFilter:
+		m.screen = tuiScreenMain
+		return m.focusFilter()
+	case tuiPaletteDoctor:
+		m.status = buildDoctorReport()
+		m.outputTitle = "Doctor"
+		m.err = nil
+		m.screen = tuiScreenPreview
+		return m, nil
+	default:
+		m.screen = tuiScreenMain
+		return m, nil
+	}
 }
 
 func (m tuiModel) openForm(name string, host config.Host) (tea.Model, tea.Cmd) {
@@ -1767,6 +2034,25 @@ func labelValue(label, value string) string {
 	return labelStyle.Render(label+": ") + value
 }
 
+func paletteItemLabel(item tuiPaletteItem, width int, hintStyle lipgloss.Style) string {
+	if strings.TrimSpace(item.hint) == "" {
+		return truncate(item.title, width)
+	}
+	if width <= 0 {
+		return ""
+	}
+	plain := item.title + "  " + item.hint
+	if lipgloss.Width(plain) <= width {
+		return item.title + "  " + hintStyle.Render(item.hint)
+	}
+	hintWidth := minInt(24, width/2)
+	titleWidth := width - hintWidth - 2
+	if titleWidth >= 10 {
+		return truncate(item.title, titleWidth) + "  " + hintStyle.Render(truncate(item.hint, hintWidth))
+	}
+	return truncate(plain, width)
+}
+
 func hostRow(item tuiHostItem, width int, targetStyle lipgloss.Style) string {
 	if width <= 0 {
 		return ""
@@ -1873,12 +2159,20 @@ func wrapText(value string, width int) string {
 }
 
 func formatCommandBlock(command string, width int) string {
-	lines := strings.Split(wrapText(command, width), "\n")
-	if len(lines) <= 1 {
+	sourceLines := strings.Split(command, "\n")
+	if len(sourceLines) == 1 && lipgloss.Width(command) <= width {
 		return command
 	}
-	for i := 1; i < len(lines); i++ {
-		lines[i] = "  " + lines[i]
+
+	lines := make([]string, 0, len(sourceLines))
+	for _, sourceLine := range sourceLines {
+		wrapped := strings.Split(wrapText(sourceLine, width), "\n")
+		for i, line := range wrapped {
+			if i > 0 {
+				line = "  " + line
+			}
+			lines = append(lines, line)
+		}
 	}
 	return strings.Join(lines, "\n")
 }

@@ -71,6 +71,8 @@ func (a App) Run(args []string) error {
 		return a.runUI(args[1:])
 	case "completion":
 		return a.runCompletion(args[1:])
+	case "doctor":
+		return a.runDoctor(args[1:])
 	case "__complete":
 		return a.runComplete(args[1:])
 	default:
@@ -1417,6 +1419,7 @@ Commands:
   remove <name>    Remove saved host
   ui               Open the interactive terminal UI (default)
   completion       Generate shell completion script
+  doctor           Check config, SSH, keys, and tunnels
   config init      Create config file if it does not exist
   config path      Print config file path
   config status    Show config file status
@@ -1483,6 +1486,9 @@ Completion:
   shbx completion install       Install completion for the current shell
   shbx completion install --shell all
                                 Install completion for bash, zsh, and fish
+
+Doctor:
+  shbx doctor                   Check config, SSH, keys, and tunnels
 `)
 }
 
@@ -1713,7 +1719,7 @@ func completePrefix(args []string) string {
 }
 
 func completeCommandNames(prefix string) []string {
-	commands := []string{"add", "list", "show", "connect", "tunnel", "group", "edit", "remove", "ui", "completion", "config", "version", "help"}
+	commands := []string{"add", "list", "show", "connect", "tunnel", "group", "edit", "remove", "ui", "completion", "doctor", "config", "version", "help"}
 	return filterSortedPrefix(commands, prefix)
 }
 

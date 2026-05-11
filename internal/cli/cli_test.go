@@ -511,6 +511,35 @@ func TestCompletionListsMatchingHosts(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsConfigAndWarnings(t *testing.T) {
+	home := withTempHome(t)
+	t.Setenv("SHBX_SSH_BIN", fakeSSHExitBinary(t, 0))
+
+	missingKey := filepath.Join(home, "missing_key")
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy", Password: "secret", IdentityFile: missingKey})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"doctor"}); err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{
+		"sshuttlebox doctor",
+		"[OK] config file:",
+		"[OK] ssh binary:",
+		"[OK] saved hosts: 1",
+		"[WARN] host \"prod\": Warning: identity file does not exist:",
+		"[WARN] saved passwords: 1 host(s)",
+		"Result: ok with",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("doctor output missing %q in %q", want, got)
+		}
+	}
+}
+
 func TestCompletionScriptMentionsHostCompletingCommands(t *testing.T) {
 	var out bytes.Buffer
 	app := App{in: strings.NewReader(""), out: &out}

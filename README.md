@@ -49,9 +49,11 @@ interactive terminal UI.
 
 - **Saved hosts** — connect to any SSH target by a short name
 - **Interactive TUI** — browse, edit, and connect without remembering flags
+- **Command palette** — run common TUI actions with `:` or `ctrl+p`
 - **Tunnels** — local, remote, and SOCKS forwarding with start/stop lifecycle
 - **Groups** — organize related hosts and tunnels for quick filtering
 - **Shell completion** — bash, zsh, and fish for all saved names
+- **Doctor checks** — inspect config, SSH, keys, and tunnel state
 - **Dry-run preview** — see the underlying `ssh` command before connecting
 - **Password auth (optional)** — keys are preferred, but passwords are supported
 
@@ -99,6 +101,12 @@ Preview the underlying SSH command without connecting:
 
 ```bash
 shbx connect prod --dry-run
+```
+
+Check local setup health:
+
+```bash
+shbx doctor
 ```
 
 ## Usage
@@ -154,6 +162,7 @@ shbx group show work
 | `shbx tunnel ...` | Add, list, show, start, stop, or remove SSH tunnels |
 | `shbx group ...` | Add, list, show, rename, or remove groups |
 | `shbx completion ...` | Generate or install shell completion |
+| `shbx doctor` | Check config, SSH, keys, and tunnels |
 | `shbx config ...` | Initialize or inspect the local config |
 | `shbx version` | Print the installed version |
 | `shbx help` | Show the full command reference |
