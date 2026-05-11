@@ -7,17 +7,13 @@
 Save SSH targets under short names, organize them into groups, manage local/remote/SOCKS tunnels, and connect with a single command — or browse everything from an interactive TUI.
 
 [![CI](https://github.com/itaprac/sshuttlebox/actions/workflows/ci.yml/badge.svg)](https://github.com/itaprac/sshuttlebox/actions/workflows/ci.yml)
+[![Website](https://img.shields.io/badge/website-live-2ea043)](https://sshuttlebox-site-production.up.railway.app)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/itaprac/sshuttlebox)](https://github.com/itaprac/sshuttlebox/blob/main/go.mod)
 [![Go Reference](https://pkg.go.dev/badge/github.com/itaprac/sshuttlebox.svg)](https://pkg.go.dev/github.com/itaprac/sshuttlebox)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](#installation)
 
 </div>
-
-```bash
-shbx add prod --host 192.0.2.10 --user deploy
-shbx connect prod
-```
 
 ---
 
