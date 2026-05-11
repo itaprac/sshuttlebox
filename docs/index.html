@@ -3,20 +3,24 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta
-      name="description"
-      content="sshuttlebox is a small terminal SSH host and tunnel manager."
-    >
-    <title>sshuttlebox</title>
+    <meta name="description" content="sshuttlebox is a small terminal SSH host and tunnel manager.">
+    <title>sshuttlebox — SSH hosts and tunnels, kept tidy.</title>
     <style>
       :root {
+        /* palette lifted straight from the original site */
         --bg: #030406;
-        --panel: #050507;
-        --panel-soft: #0a0b10;
+        --bg-soft: #050609;
+        --panel: #0a0b10;
+        --panel-2: #0d0e14;
+        --chrome: #101116;
         --border: #3a3a41;
+        --line: rgba(255, 255, 255, 0.10);
+        --line-strong: rgba(255, 255, 255, 0.22);
+        --text: #f4f1ff;
+        --text-soft: #d8d3e0;
         --muted: #8a8a91;
         --dim: #5f5f66;
-        --text: #f4f1ff;
+
         --blue: #5f87ff;
         --cyan: #5fafff;
         --green: #00d787;
@@ -24,664 +28,564 @@
         --purple: #875fff;
         --lavender: #af87ff;
         --pink: #ff87ff;
-        --shadow: rgba(135, 95, 255, 0.32);
-        --chrome: #101116;
+
+        --shadow-violet: rgba(95, 95, 255, 0.45);
+        --shadow-purple: rgba(135, 95, 255, 0.45);
+        --shadow-pink: rgba(255, 135, 255, 0.32);
       }
 
-      * {
-        box-sizing: border-box;
-      }
-
+      * { box-sizing: border-box; }
       html {
         color-scheme: dark;
         scroll-behavior: smooth;
+        background: var(--bg);
       }
-
       body {
         min-width: 320px;
+        min-height: 100vh;
+        min-height: 100dvh;
         margin: 0;
+        overflow-x: clip;
         color: var(--text);
         background:
-          radial-gradient(circle at 18% 28%, rgba(95, 95, 255, 0.14), transparent 28rem),
-          radial-gradient(circle at 58% 20%, rgba(255, 135, 255, 0.09), transparent 32rem),
-          linear-gradient(180deg, #050609 0%, var(--bg) 58%, #020203 100%);
-        font-family:
-          ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono",
-          Menlo, monospace;
+          radial-gradient(circle at 18% 22%, rgba(95, 95, 255, 0.16), transparent 30rem),
+          radial-gradient(circle at 84% 14%, rgba(255, 135, 255, 0.10), transparent 32rem),
+          linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 58%, #020203 100%);
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", Helvetica, Arial, sans-serif;
+        font-size: 17px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
       }
-
       body::before {
         position: fixed;
         inset: 0;
         z-index: -1;
-        pointer-events: none;
         content: "";
+        pointer-events: none;
         background-image:
           linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
           linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
         background-size: 72px 72px;
-        mask-image: linear-gradient(to bottom, black, transparent 86%);
+        mask-image: linear-gradient(to bottom, black, transparent 88%);
       }
 
-      a {
-        color: inherit;
-        text-decoration: none;
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
+          "Liberation Mono", Menlo, monospace;
       }
+      a { color: inherit; text-decoration: none; }
 
       .page {
-        width: min(100%, 1500px);
+        width: min(100%, 1640px);
         margin: 0 auto;
+        padding: 0 2.5rem;
       }
 
+      /* --- header --- */
       .site-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 2rem;
-        min-height: 76px;
-        padding: 0 2rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        gap: 1rem;
+        padding: 1.75rem 0;
       }
-
       .brand {
         display: inline-flex;
         align-items: center;
-        gap: 0.85rem;
-        font-size: clamp(1.2rem, 2vw, 1.65rem);
+        gap: 0.75rem;
         font-weight: 800;
-        letter-spacing: 0;
+        font-size: 1.25rem;
+        letter-spacing: -0.02em;
       }
-
-      .brand svg,
-      .feature-icon svg,
-      .github-icon {
-        flex: 0 0 auto;
+      .brand-tag {
+        padding: 0.32rem 0.65rem;
+        border-radius: 6px;
+        background: linear-gradient(135deg, var(--violet), var(--pink));
+        color: var(--text);
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        box-shadow: 2px 2px 0 var(--purple);
       }
-
-      .brand-name,
-      .hero h1,
-      .feature h2 {
-        background: linear-gradient(90deg, var(--blue), var(--lavender), var(--pink));
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-      }
-
       .nav {
         display: flex;
         align-items: center;
-        gap: 1rem;
-        color: #f2efff;
-        font-size: 0.95rem;
+        gap: 1.6rem;
+        color: var(--text-soft);
+        font-size: 1rem;
+        font-weight: 500;
       }
-
-      .nav a {
-        opacity: 0.9;
-        transition: color 160ms ease, opacity 160ms ease;
-      }
-
-      .nav a:hover {
-        color: var(--pink);
-        opacity: 1;
-      }
-
-      main {
-        padding: 2.35rem 2rem 2.7rem;
-      }
-
-      .hero {
-        display: grid;
-        grid-template-columns: minmax(28rem, 0.78fr) minmax(38rem, 1.22fr);
-        align-items: center;
-        gap: clamp(2.2rem, 4vw, 4.6rem);
-        min-height: calc(100svh - 190px);
-      }
-
-      .hero-copy {
-        max-width: 42rem;
-      }
-
-      .eyebrow {
-        margin: 0 0 1.2rem;
-        color: var(--cyan);
-        font-size: 0.85rem;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-      }
-
-      .hero h1 {
-        max-width: 12ch;
-        margin: 0;
-        font-size: clamp(3.3rem, 5vw, 5.35rem);
-        line-height: 1.08;
-        letter-spacing: 0;
-      }
-
-      .lead {
-        max-width: 34rem;
-        margin: 1.75rem 0 2rem;
-        color: #b8b4bd;
-        font-size: clamp(1.15rem, 2vw, 1.45rem);
-        line-height: 1.65;
-      }
-
-      .lead strong {
-        color: var(--violet);
-        font-weight: 800;
-      }
-
-      .actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 1rem;
-        align-items: center;
-      }
-
-      .install-command,
-      .github-link {
+      .nav-gh {
         display: inline-flex;
         align-items: center;
-        min-height: 3.35rem;
-        border-radius: 6px;
-        font-size: 0.94rem;
-        transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+        gap: 0.5rem;
+        transition: color 160ms ease;
       }
+      .nav-gh svg { display: block; }
+      .nav-gh:hover { color: var(--pink); }
 
-      .install-command {
-        position: relative;
-        color: inherit;
-        cursor: pointer;
-        gap: 0.55rem;
-        max-width: 100%;
-        padding: 0 1rem;
-        border: 1px solid var(--lavender);
-        background: rgba(5, 5, 7, 0.84);
-        box-shadow: 0 0 0 1px rgba(95, 95, 255, 0.1), 0 0 26px var(--shadow);
-        white-space: nowrap;
-      }
+      main { padding: 3rem 0 4.5rem; }
 
-      .prompt {
-        color: var(--text);
-        font-size: 1.25rem;
-        font-weight: 800;
-      }
-
-      .install-command code {
-        overflow: hidden;
-        font-size: clamp(0.7rem, 1.05vw, 0.86rem);
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .copy-status {
-        position: absolute;
-        top: calc(100% + 0.5rem);
-        right: 0.85rem;
-        z-index: 2;
-        min-width: max-content;
-        padding: 0.35rem 0.55rem;
-        color: var(--green);
-        border: 1px solid rgba(0, 215, 135, 0.34);
-        border-radius: 5px;
-        background: rgba(3, 4, 6, 0.92);
-        box-shadow: 0 0 22px rgba(0, 215, 135, 0.16);
-        font-size: 0.78rem;
-        opacity: 0;
-        pointer-events: none;
-        transform: translateY(0.45rem) scale(0.96);
-      }
-
-      .install-command.copied .copy-status {
-        animation: copyToast 1.8s cubic-bezier(0.19, 1, 0.22, 1) both;
-      }
-
-      @keyframes copyToast {
-        0% {
-          opacity: 0;
-          transform: translateY(0.45rem) scale(0.96);
-        }
-
-        16%,
-        76% {
-          opacity: 1;
-          transform: translateY(0) scale(1);
-        }
-
-        100% {
-          opacity: 0;
-          transform: translateY(-0.35rem) scale(0.98);
-        }
-      }
-
-      .github-link {
-        gap: 0.65rem;
-        padding: 0 1.05rem;
-        border: 1px solid var(--border);
-        background: rgba(10, 11, 16, 0.72);
-      }
-
-      .install-command:hover,
-      .github-link:hover {
-        border-color: var(--pink);
-        transform: translateY(-1px);
-        box-shadow: 0 0 30px rgba(255, 135, 255, 0.16);
-      }
-
-      .terminal {
-        width: 100%;
-        max-width: 53rem;
-        min-width: 0;
-        justify-self: end;
-        border: 1px solid var(--border);
-        border-radius: 9px;
-        background: var(--chrome);
-        box-shadow:
-          0 18px 58px rgba(0, 0, 0, 0.45),
-          0 0 0 1px rgba(255, 255, 255, 0.015);
-        font-size: clamp(0.68rem, 0.82vw, 0.82rem);
-        overflow: hidden;
-      }
-
-      .terminal-chrome {
-        display: flex;
+      /* --- hero --- */
+      .hero {
+        display: grid;
+        grid-template-columns: 0.85fr 1.25fr;
+        gap: clamp(2.4rem, 4vw, 4.5rem);
         align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        height: 2.25rem;
-        padding: 0 0.8rem;
-        color: var(--muted);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        background: linear-gradient(180deg, #15161c, #0c0d12);
-        font-size: 0.78rem;
       }
+      .hero-copy { max-width: 42rem; }
 
-      .window-controls {
-        display: flex;
-        gap: 0.42rem;
-      }
-
-      .window-controls span {
-        width: 0.66rem;
-        height: 0.66rem;
-        border-radius: 999px;
-        background: var(--dim);
-      }
-
-      .window-controls span:nth-child(1) {
-        background: #ff5f87;
-      }
-
-      .window-controls span:nth-child(2) {
-        background: #ffd75f;
-      }
-
-      .window-controls span:nth-child(3) {
-        background: var(--green);
-      }
-
-      .terminal-titlebar {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .terminal-spacer {
-        width: 3.24rem;
-      }
-
-      .terminal-inner {
-        padding: clamp(1rem, 1.55vw, 1.22rem);
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 24%),
-          var(--panel);
-      }
-
-      .terminal-banner {
-        display: flex;
-        align-items: flex-end;
-        gap: 1.2rem;
-        min-width: 0;
-        margin-bottom: 1.35rem;
-      }
-
-      .ascii {
+      .display {
         margin: 0;
-        background: linear-gradient(90deg, var(--violet), var(--purple), var(--lavender), var(--pink));
+        font-size: clamp(3rem, 6.2vw, 5.4rem);
+        font-weight: 800;
+        line-height: 1.02;
+        letter-spacing: -0.035em;
+      }
+      .display em {
+        font-style: normal;
+        background: linear-gradient(110deg, var(--blue), var(--violet), var(--lavender), var(--pink));
         -webkit-background-clip: text;
         background-clip: text;
         color: transparent;
-        filter: drop-shadow(3px 3px 0 rgba(95, 95, 255, 0.44));
-        font-size: clamp(3.2rem, 5.2vw, 4.9rem);
-        font-weight: 900;
-        line-height: 0.78;
-        letter-spacing: 0;
-        text-transform: uppercase;
       }
 
-      .version {
-        margin: 0 0 0.45rem;
-        color: #8787ff;
-        font-size: 0.85rem;
-        font-style: italic;
-        white-space: nowrap;
-      }
-
-      .terminal-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 0.96fr) minmax(0, 1.04fr);
-        gap: 1rem;
-      }
-
-      .term-panel {
-        min-width: 0;
-        min-height: 12.2rem;
-        padding: 0.8rem;
-        border: 1px solid var(--border);
-        border-radius: 5px;
-        background: #020203;
-        overflow: hidden;
-      }
-
-      .term-panel.focused {
-        border-color: var(--purple);
-        box-shadow: 0 0 0 1px rgba(135, 95, 255, 0.18);
-      }
-
-      .term-title {
-        margin-bottom: 0.78rem;
-        color: var(--blue);
-        font-weight: 800;
-        text-transform: uppercase;
-      }
-
-      .focused .term-title {
-        color: var(--pink);
-      }
-
-      .term-line,
-      .detail-row,
-      .help-line,
-      .preview-line {
-        display: flex;
-        min-width: 0;
-        gap: 0.85rem;
-        color: #d8d5de;
+      .lead {
+        max-width: 36rem;
+        margin: 1.7rem 0 1.85rem;
+        color: var(--text-soft);
+        font-size: 1.22rem;
         line-height: 1.55;
-        white-space: nowrap;
       }
-
-      .term-line {
-        justify-content: flex-start;
-        padding: 0 0.15rem;
+      .lead strong {
+        font-weight: 700;
+        background: linear-gradient(110deg, var(--violet), var(--pink));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
       }
-
-      .term-line.selected {
-        color: #ffffff;
-        background: var(--violet);
-      }
-
-      .group {
+      .lead .kbd {
+        padding: 0.05rem 0.4rem;
+        border: 1.5px solid var(--lavender);
+        border-radius: 4px;
+        background: rgba(135, 95, 255, 0.10);
         color: var(--lavender);
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
+          "Liberation Mono", Menlo, monospace;
+        font-size: 0.85em;
+      }
+
+      .actions { display: flex; flex-wrap: wrap; gap: 0.7rem; align-items: center; }
+
+      .install {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        max-width: 100%;
+        padding: 1rem 1.15rem;
+        border: 1.5px solid var(--lavender);
+        border-radius: 9px;
+        background: rgba(5, 5, 7, 0.84);
+        color: var(--text);
+        font: inherit;
+        font-size: 1rem;
+        text-align: left;
+        cursor: pointer;
+        box-shadow: 5px 5px 0 var(--violet);
+        transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+      }
+      .install:hover {
+        transform: translate(-1px, -1px);
+        border-color: var(--pink);
+        box-shadow: 7px 7px 0 var(--pink);
+      }
+      .install:active { transform: translate(1px, 1px); box-shadow: 3px 3px 0 var(--violet); }
+      .install .prompt {
+        background: linear-gradient(135deg, var(--violet), var(--pink));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
         font-weight: 800;
       }
-
-      .host-name,
-      .tunnel-name {
-        min-width: 5.9rem;
-      }
-
-      .target,
-      .tunnel-target,
-      .muted {
-        color: var(--muted);
-      }
-
-      .target,
-      .tunnel-target {
+      .install code {
         overflow: hidden;
         text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
+          "Liberation Mono", Menlo, monospace;
+        font-size: 0.95rem;
+      }
+      .install .ico { margin-left: 0.35rem; color: var(--muted); font-size: 1.1rem; }
+      .copy-status {
+        position: absolute;
+        bottom: calc(100% + 0.55rem);
+        right: 0.25rem;
+        padding: 0.35rem 0.65rem;
+        border-radius: 6px;
+        background: rgba(3, 4, 6, 0.95);
+        border: 1px solid rgba(0, 215, 135, 0.36);
+        box-shadow: 0 6px 24px rgba(0, 215, 135, 0.18);
+        color: var(--green);
+        font-size: 0.76rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+        opacity: 0;
+        transform: translateY(6px) scale(0.94);
+        transition:
+          opacity 260ms ease,
+          transform 320ms cubic-bezier(0.22, 1.4, 0.36, 1);
+        pointer-events: none;
+      }
+      .install.copied .copy-status {
+        opacity: 1;
+        transform: translateY(0) scale(1);
       }
 
-      .running {
+      /* --- terminal card --- */
+      .term-wrap {
+        position: relative;
+        min-width: 0;
+      }
+      .term-wrap::after {
+        content: "";
+        position: absolute;
+        right: -1rem;
+        bottom: -1rem;
+        left: 1rem;
+        top: 60%;
+        z-index: -1;
+        border-radius: 14px;
+        background: radial-gradient(ellipse at top, var(--shadow-purple), transparent 70%);
+        filter: blur(40px);
+        pointer-events: none;
+      }
+
+      .term-card {
+        position: relative;
+        margin-right: 10px;
+        border: 1.5px solid var(--line-strong);
+        border-radius: 14px;
+        background: var(--chrome);
+        color: var(--text);
+        box-shadow:
+          10px 10px 0 var(--violet),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+        overflow: hidden;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
+          "Liberation Mono", Menlo, monospace;
+        font-size: clamp(0.82rem, 0.95vw, 0.96rem);
+      }
+      .term-chrome {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        height: 2.5rem;
+        padding: 0 1rem;
+        background: linear-gradient(180deg, #1a1c28, #11121b);
+        border-bottom: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .dots { display: inline-flex; gap: 0.4rem; }
+      .dots span { width: 0.72rem; height: 0.72rem; border-radius: 50%; }
+      .dots span:nth-child(1) { background: #ff5f87; }
+      .dots span:nth-child(2) { background: #ffd75f; }
+      .dots span:nth-child(3) { background: var(--green); }
+      .term-chrome .title { flex: 1; text-align: center; }
+      .term-chrome .meta { color: var(--dim); font-size: 0.8rem; letter-spacing: 0.04em; }
+
+      .term-inner {
+        padding: 1.35rem;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 22%),
+          var(--panel);
+      }
+
+      .term-banner {
+        display: flex;
+        align-items: flex-end;
+        gap: 1.2rem;
+        margin-bottom: 1.25rem;
+      }
+      .ascii {
+        margin: 0;
+        white-space: pre;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
+          "Liberation Mono", Menlo, monospace;
+        font-size: clamp(0.55rem, 0.95vw, 0.92rem);
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: 0;
+        background: linear-gradient(90deg, var(--violet) 0%, var(--purple) 28%, var(--lavender) 56%, #d787ff 78%, var(--pink) 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        filter: drop-shadow(2px 2px 0 var(--shadow-violet));
+      }
+      .banner-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+        padding-bottom: 0.45rem;
+        color: var(--text-soft);
+        font-size: 0.95em;
+      }
+      .banner-meta .ver { color: var(--lavender); font-style: italic; }
+      .banner-meta .status::before {
+        content: "●";
+        margin-right: 0.4rem;
         color: var(--green);
       }
 
-      .details {
-        min-height: 10.4rem;
-        margin-top: 1rem;
+      .term-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-rows: auto auto;
+        gap: 0.85rem;
       }
-
-      .detail-name {
-        color: var(--violet);
-        font-weight: 800;
+      .panel {
+        min-width: 0;
+        padding: 0.95rem 1rem;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--bg);
       }
-
-      .detail-label {
-        min-width: 8.5rem;
+      .panel.hosts {
+        grid-row: 1 / span 2;
+        min-height: 15rem;
+      }
+      .panel.tunnels {
+        grid-column: 2;
+        grid-row: 1;
+      }
+      .panel.details {
+        grid-column: 2;
+        grid-row: 2;
+      }
+      .panel.focused {
+        border-color: var(--purple);
+        box-shadow: 0 0 0 1px rgba(135, 95, 255, 0.25), 0 0 18px rgba(135, 95, 255, 0.20);
+      }
+      .panel-title {
+        margin-bottom: 0.8rem;
         color: var(--blue);
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 0.92em;
       }
+      .focused .panel-title { color: var(--pink); }
 
-      .detail-value {
-        color: #e8e5ed;
+      .line, .detail-row, .preview-line {
+        display: flex;
+        gap: 0.9rem;
+        min-width: 0;
+        padding: 0.05rem 0.2rem;
+        color: #d8d5de;
+        line-height: 1.65;
+        white-space: nowrap;
       }
-
-      .preview-line {
-        margin-top: 1rem;
-        color: var(--dim);
+      .line.selected {
+        color: #ffffff;
+        background: var(--violet);
       }
-
-      .footer {
-        margin-top: 0.85rem;
+      .line.selected .target { color: #ffffd7; }
+      .group { color: var(--lavender); font-weight: 800; }
+      .name { min-width: 7rem; }
+      .host, .target {
         color: var(--muted);
-        font-size: 0.88rem;
-        line-height: 1.55;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
+      .on { color: var(--green); }
+      .off { color: var(--dim); }
+      .status-col { min-width: 5.5rem; }
 
+      .details { min-height: 0; }
+      .detail-name {
+        color: var(--lavender);
+        font-weight: 800;
+        font-size: 1.02em;
+        margin-bottom: 0.15rem;
+      }
+      .detail-row { line-height: 1.5; }
+      .detail-label { min-width: 6.5rem; color: var(--blue); }
+      .detail-value { color: #ece8f3; }
+      .preview-line { margin-top: 1rem; color: var(--dim); }
+      .preview-line::before { content: "$ "; color: var(--cyan); }
+
+      .term-footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+        color: var(--text-soft);
+        font-size: 0.85rem;
+      }
+      .term-footer kbd {
+        padding: 0.05rem 0.45rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 0.82rem;
+      }
+      .term-footer .ready { color: var(--green); }
+
+      /* --- ASCII TUI panels (real lipgloss-style render) --- */
+      .tui-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        align-items: flex-start;
+        margin-bottom: 0.5rem;
+      }
+      .tui-row {
+        display: flex;
+        gap: 0.65rem;
+        flex-wrap: nowrap;
+        max-width: 100%;
+      }
+      .tui-panel {
+        margin: 0;
+        padding: 0;
+        white-space: pre;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
+          "Liberation Mono", Menlo, monospace;
+        font-size: clamp(0.52rem, 0.72vw, 0.78rem);
+        line-height: 1.32;
+        color: #d8d5de;
+      }
+      .tui-panel .b { color: rgba(255, 255, 255, 0.18); }
+      .tui-panel .b.f { color: var(--purple); }
+      .tui-panel .title { color: var(--blue); font-weight: 700; }
+      .tui-panel .title.focused { color: var(--pink); }
+      .tui-panel .group { color: var(--lavender); font-weight: 700; }
+      .tui-panel .sel { background: var(--violet); }
+      .tui-panel .sn { color: #ffffff; font-weight: 700; }
+      .tui-panel .st { color: #ffffd7; }
+      .tui-panel .host { color: var(--muted); }
+      .tui-panel .on { color: var(--green); }
+      .tui-panel .off { color: var(--dim); }
+      .tui-panel .label { color: var(--blue); }
+      .tui-panel .dname { color: var(--lavender); font-weight: 700; }
+      .tui-panel .dim { color: var(--dim); }
+
+      /* --- features --- */
       .features {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0;
-        margin-top: 2.6rem;
-        border-top: 0;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.8rem;
+        margin-top: 5.5rem;
       }
-
-      .feature {
-        display: grid;
-        grid-template-columns: 4.5rem 1fr;
-        gap: 1.2rem;
-        align-items: start;
-        min-height: 7.1rem;
-        padding: 0.45rem clamp(1.4rem, 3vw, 3.2rem);
-        border-right: 1px solid rgba(255, 255, 255, 0.18);
+      .card {
+        position: relative;
+        padding: 2rem 1.85rem 2.15rem;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 60%),
+          var(--panel);
+        border: 1.5px solid var(--line-strong);
+        border-radius: 14px;
+        transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
       }
+      .card:nth-child(1) { box-shadow: 8px 8px 0 var(--violet); }
+      .card:nth-child(2) { box-shadow: 8px 8px 0 var(--pink); }
+      .card:nth-child(3) { box-shadow: 8px 8px 0 var(--green); }
+      .card:hover { transform: translate(-1px, -1px); border-color: rgba(255, 255, 255, 0.32); }
+      .card:nth-child(1):hover { box-shadow: 10px 10px 0 var(--violet); }
+      .card:nth-child(2):hover { box-shadow: 10px 10px 0 var(--pink); }
+      .card:nth-child(3):hover { box-shadow: 10px 10px 0 var(--green); }
 
-      .feature:first-child {
-        padding-left: clamp(0rem, 2vw, 3rem);
-      }
-
-      .feature:last-child {
-        border-right: 0;
-        padding-right: 0;
-      }
-
-      .feature-icon {
-        display: grid;
+      .card .num {
+        display: inline-grid;
         place-items: center;
-        width: 3.3rem;
-        height: 3.3rem;
-        color: var(--lavender);
-        border: 2px solid var(--lavender);
-        border-radius: 6px;
-        box-shadow: inset 0 0 20px rgba(95, 95, 255, 0.12);
+        width: 3.1rem;
+        height: 3.1rem;
+        margin-bottom: 1.15rem;
+        border: 2px solid currentColor;
+        border-radius: 8px;
+        box-shadow: inset 0 0 20px rgba(95, 95, 255, 0.14);
       }
+      .card .num svg { display: block; }
+      .card:nth-child(1) .num { color: var(--lavender); }
+      .card:nth-child(2) .num { color: var(--pink); box-shadow: inset 0 0 20px rgba(255, 135, 255, 0.14); }
+      .card:nth-child(3) .num { color: var(--green); box-shadow: inset 0 0 20px rgba(0, 215, 135, 0.14); }
 
-      .feature h2 {
-        margin: 0 0 0.7rem;
-        font-size: clamp(1rem, 1.6vw, 1.25rem);
-        line-height: 1.25;
+      .card h2 {
+        margin: 0 0 0.55rem;
+        font-size: 1.35rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--text);
       }
-
-      .feature p {
-        max-width: 26rem;
+      .card p {
         margin: 0;
-        color: #aaa6af;
-        line-height: 1.6;
+        color: var(--muted);
+        font-size: 1.04rem;
+        line-height: 1.55;
       }
-
-      @media (max-width: 1240px) {
-        .hero {
-          grid-template-columns: 1fr;
-          min-height: auto;
-        }
-
-        .hero-copy {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.78fr);
-          align-items: end;
-          gap: 1.5rem 2rem;
-          max-width: none;
-        }
-
-        .hero h1 {
-          max-width: 14ch;
-        }
-
-        .hero-copy .eyebrow,
-        .hero-copy h1 {
-          grid-column: 1;
-        }
-
-        .hero-copy .lead,
-        .hero-copy .actions {
-          grid-column: 2;
-        }
-
-        .terminal {
-          justify-self: center;
-          max-width: 54rem;
-        }
+      .card .tag {
+        display: inline-block;
+        margin-top: 1rem;
+        padding: 0.25rem 0.55rem;
+        border-radius: 5px;
+        background: rgba(95, 95, 255, 0.14);
+        color: var(--lavender);
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
+          "Liberation Mono", Menlo, monospace;
+        font-size: 0.88rem;
       }
+      .card:nth-child(2) .tag { background: rgba(255, 135, 255, 0.12); color: var(--pink); }
+      .card:nth-child(3) .tag { background: rgba(0, 215, 135, 0.12); color: var(--green); }
 
-      @media (max-width: 760px) {
-        .site-header {
-          align-items: flex-start;
-          flex-direction: column;
-          gap: 1rem;
-          padding: 1.15rem;
-        }
+      /* --- footer --- */
+      .site-footer {
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-top: 5rem;
+        padding: 2rem 0;
+        border-top: 1px solid var(--line);
+        color: var(--dim);
+        font-size: 0.95rem;
+      }
+      .site-footer a { color: var(--text-soft); font-weight: 500; }
+      .site-footer a:hover { color: var(--pink); }
 
-        .nav {
-          width: auto;
-          justify-content: flex-start;
-          gap: 1rem;
-          font-size: 0.86rem;
-        }
-
-        main {
-          padding: 1.7rem 1rem 2rem;
-        }
-
-        .hero h1 {
-          font-size: clamp(3rem, 16vw, 4.4rem);
-        }
-
-        .hero-copy,
-        .hero-copy .eyebrow,
-        .hero-copy h1,
-        .hero-copy .lead,
-        .hero-copy .actions {
-          display: block;
-        }
-
-        .lead {
-          font-size: 1rem;
-        }
-
-        .actions {
-          align-items: stretch;
-          flex-direction: column;
-        }
-
-        .install-command,
-        .github-link {
-          width: 100%;
-          justify-content: flex-start;
-        }
-
-        .install-command {
-          margin-bottom: 0.65rem;
-        }
-
-        .terminal {
-          margin-right: -1rem;
-          margin-left: -1rem;
-          max-width: none;
-          width: calc(100% + 2rem);
-          border-right: 0;
-          border-left: 0;
-          border-radius: 0;
-          background: transparent;
-          box-shadow: none;
-          overflow-x: auto;
-        }
-
-        .terminal-inner {
-          min-width: 41rem;
-          padding: 1rem;
-        }
-
-        .terminal-chrome {
-          border-radius: 0;
-        }
-
-        .copy-status {
-          right: 0.75rem;
-        }
-
-        .terminal-grid {
+      /* --- responsive --- */
+      @media (max-width: 1180px) {
+        .hero { grid-template-columns: 1fr; gap: 2.75rem; }
+        .term-wrap { max-width: 56rem; margin: 0 auto; width: 100%; }
+      }
+      @media (max-width: 840px) {
+        .features { grid-template-columns: 1fr; gap: 1.4rem; margin-top: 3.75rem; }
+        .term-grid {
           grid-template-columns: 1fr;
+          grid-template-rows: auto;
         }
-
-        .features {
-          grid-template-columns: 1fr;
-          gap: 1.35rem;
-          margin-top: 2rem;
+        .panel.hosts, .panel.tunnels, .panel.details {
+          grid-row: auto;
+          grid-column: auto;
         }
-
-        .feature {
-          grid-template-columns: 3.5rem minmax(0, 1fr);
-          gap: 1rem;
-          min-height: auto;
-          width: min(100%, 36rem);
-          padding: 0;
-          border-right: 0;
-        }
-
-        .feature:first-child,
-        .feature:last-child {
-          padding-right: 0;
-          padding-left: 0;
-        }
-
-        .feature-icon {
-          width: 3.15rem;
-          height: 3.15rem;
-        }
-
-        .feature p {
-          max-width: 100%;
-          font-size: 0.95rem;
-        }
+        .panel { min-height: 0; }
+        .panel.hosts { min-height: 0; }
+        .page { padding: 0 1.25rem; }
+      }
+      @media (max-width: 540px) {
+        main { padding: 1.75rem 0 3rem; }
+        .display { font-size: clamp(2.6rem, 11vw, 3.6rem); }
+        .install { padding: 0.85rem 0.95rem; font-size: 0.92rem; }
+        .install code { font-size: 0.82rem; }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        *,
-        *::before,
-        *::after {
-          scroll-behavior: auto !important;
-          transition-duration: 0.01ms !important;
-        }
+        * { transition-duration: 0.01ms !important; }
       }
     </style>
   </head>
@@ -689,204 +593,182 @@
     <div class="page">
       <header class="site-header">
         <a class="brand" href="#" aria-label="sshuttlebox home">
-          <svg width="38" height="38" viewBox="0 0 38 38" aria-hidden="true">
-            <path d="M19 3 33 11v16L19 35 5 27V11L19 3Z" fill="none" stroke="#875fff" stroke-width="3" stroke-linejoin="round"/>
-            <path d="M19 19 5 11m14 8 14-8M19 19v16" fill="none" stroke="#af87ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span class="brand-name">sshuttlebox</span>
+          <span class="brand-tag">SHBX</span>
+          <span>sshuttlebox</span>
         </a>
-        <nav class="nav" aria-label="Primary navigation">
-          <a href="https://github.com/itaprac/sshuttlebox">GitHub</a>
+        <nav class="nav" aria-label="Primary">
+          <a class="nav-gh" href="https://github.com/itaprac/sshuttlebox">
+            <span>GitHub</span>
+            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.16c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.8 1.3 3.49.99.11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.92 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23A11.5 11.5 0 0 1 12 6.86c1.02 0 2.04.14 3 .41 2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.6-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z"/>
+            </svg>
+          </a>
         </nav>
       </header>
 
       <main>
-        <section class="hero" aria-labelledby="hero-title">
+        <section class="hero" aria-labelledby="title">
           <div class="hero-copy">
-            <p class="eyebrow">Terminal SSH manager</p>
-            <h1 id="hero-title">SSH hosts and tunnels, kept tidy.</h1>
+            <h1 class="display" id="title">SSH hosts &amp; tunnels, <em>kept tidy.</em></h1>
             <p class="lead">
               Save hosts, group tunnels, preview commands, and jump in with
-              <strong>shbx</strong>.
+              <strong>shbx</strong>. Local config, no servers — just your
+              terminal and a short <span class="kbd">$</span> away.
             </p>
             <div class="actions" id="install">
               <button
                 type="button"
-                class="install-command"
+                class="install"
                 data-copy="go install github.com/itaprac/sshuttlebox/cmd/shbx@latest"
-                aria-label="Copy installation command"
+                aria-label="Copy install command"
               >
-                <span class="prompt">&gt;</span>
+                <span class="prompt">$</span>
                 <code>go install github.com/itaprac/sshuttlebox/cmd/shbx@latest</code>
-                <span class="copy-status" aria-live="polite">Copied to clipboard</span>
+                <span class="ico" aria-hidden="true">⎘</span>
+                <span class="copy-status" aria-live="polite">Copied!</span>
               </button>
-              <a class="github-link" href="https://github.com/itaprac/sshuttlebox">
-                <svg class="github-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
-                  <path fill="currentColor" d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.16c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.8 1.3 3.49.99.11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.92 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23A11.5 11.5 0 0 1 12 6.86c1.02 0 2.04.14 3 .41 2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.6-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z"/>
-                </svg>
-                <span>View GitHub</span>
-              </a>
             </div>
           </div>
 
-          <div class="terminal" aria-label="sshuttlebox terminal UI preview">
-            <div class="terminal-chrome" aria-hidden="true">
-              <div class="window-controls">
-                <span></span>
-                <span></span>
-                <span></span>
+          <div class="term-wrap">
+            <div class="term-card" aria-label="shbx terminal UI preview">
+              <div class="term-chrome" aria-hidden="true">
+                <span class="dots"><span></span><span></span><span></span></span>
+                <span class="title">shbx ui — sshuttlebox</span>
+                <span class="meta">~/dev</span>
               </div>
-              <div class="terminal-titlebar">shbx ui - sshuttlebox</div>
-              <div class="terminal-spacer"></div>
-            </div>
-            <div class="terminal-inner">
-              <div class="terminal-banner">
-                <pre class="ascii" aria-hidden="true">SHBX</pre>
-                <p class="version">sshuttlebox 0.2.1</p>
+              <div class="term-inner">
+                <div class="term-banner">
+<pre class="ascii" aria-hidden="true"> ███████╗██╗  ██╗██████╗ ██╗  ██╗
+ ██╔════╝██║  ██║██╔══██╗╚██╗██╔╝
+ ███████╗███████║██████╔╝ ╚███╔╝
+ ╚════██║██╔══██║██╔══██╗ ██╔██╗
+ ███████║██║  ██║██████╔╝██╔╝ ██╗
+ ╚══════╝╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝</pre>
+                  <div class="banner-meta">
+                    <span class="ver">sshuttlebox 0.2.1</span>
+                  </div>
+                </div>
+
+                <div class="tui-grid" aria-label="shbx TUI render">
+                  <div class="tui-row">
+<pre class="tui-panel hosts">
+<span class="b f">╭────────────────────────────────────────────────╮</span>
+<span class="b f">│</span> <span class="title focused">HOSTS</span>                                          <span class="b f">│</span>
+<span class="b f">│</span>                                                <span class="b f">│</span>
+<span class="b f">│</span> <span class="group">▸ work</span>                                         <span class="b f">│</span>
+<span class="b f">│</span><span class="sel"> <span class="sn">&gt; web-prod</span>      <span class="st">deploy@203.0.113.21:22</span>         </span><span class="b f">│</span>
+<span class="b f">│</span>   api-stage     <span class="host">ops@198.51.100.14:22</span>           <span class="b f">│</span>
+<span class="b f">│</span>   bastion       <span class="host">ubuntu@192.0.2.8:22</span>            <span class="b f">│</span>
+<span class="b f">│</span>                                                <span class="b f">│</span>
+<span class="b f">│</span> <span class="group">▸ dev</span>                                          <span class="b f">│</span>
+<span class="b f">│</span>   cache-dev     <span class="host">dev@10.0.4.18:22</span>               <span class="b f">│</span>
+<span class="b f">│</span>   monitoring    <span class="host">ops@198.51.100.40:22</span>           <span class="b f">│</span>
+<span class="b f">│</span>                                                <span class="b f">│</span>
+<span class="b f">╰────────────────────────────────────────────────╯</span></pre>
+<pre class="tui-panel tunnels">
+<span class="b">╭────────────────────────────────────────────────╮</span>
+<span class="b">│</span> <span class="title">TUNNELS</span>                                        <span class="b">│</span>
+<span class="b">│</span>                                                <span class="b">│</span>
+<span class="b">│</span>   db-local  <span class="on">running</span>  <span class="host">:5432 → 10.0.4.20:5432</span>    <span class="b">│</span>
+<span class="b">│</span>   redis     <span class="off">stopped</span>  <span class="host">:6379 → 10.0.4.21:6379</span>    <span class="b">│</span>
+<span class="b">│</span>   socks     <span class="on">running</span>  <span class="host">:1080 (dynamic)</span>           <span class="b">│</span>
+<span class="b">│</span>                                                <span class="b">│</span>
+<span class="b">│</span>                                                <span class="b">│</span>
+<span class="b">│</span>                                                <span class="b">│</span>
+<span class="b">│</span>                                                <span class="b">│</span>
+<span class="b">│</span>                                                <span class="b">│</span>
+<span class="b">│</span>                                                <span class="b">│</span>
+<span class="b">╰────────────────────────────────────────────────╯</span></pre>
+                  </div>
+<pre class="tui-panel details">
+<span class="b">╭────────────────────────────────────────────────────────────────────────────────────────────────────╮</span>
+<span class="b">│</span> <span class="title">DETAILS</span>                                                                                            <span class="b">│</span>
+<span class="b">│</span>                                                                                                    <span class="b">│</span>
+<span class="b">│</span> <span class="dname">web-prod</span>                                                                                           <span class="b">│</span>
+<span class="b">│</span>                                                                                                    <span class="b">│</span>
+<span class="b">│</span> <span class="label">Host:</span>           203.0.113.21                                                                       <span class="b">│</span>
+<span class="b">│</span> <span class="label">User:</span>           deploy                                                                             <span class="b">│</span>
+<span class="b">│</span> <span class="label">Port:</span>           22                                                                                 <span class="b">│</span>
+<span class="b">│</span> <span class="label">Identity file:</span>  ~/.ssh/work_key                                                                    <span class="b">│</span>
+<span class="b">│</span> <span class="label">Group:</span>          work                                                                               <span class="b">│</span>
+<span class="b">│</span> <span class="label">Password:</span>       <span class="dim">—</span>                                                                                  <span class="b">│</span>
+<span class="b">│</span>                                                                                                    <span class="b">│</span>
+<span class="b">│</span> <span class="dim">ssh -p 22 -i ~/.ssh/work_key deploy@203.0.113.21</span>                                                   <span class="b">│</span>
+<span class="b">│</span>                                                                                                    <span class="b">│</span>
+<span class="b">╰────────────────────────────────────────────────────────────────────────────────────────────────────╯</span></pre>
+                </div>
+
+                <div class="term-footer">
+                  <span>
+                    <kbd>↵/c</kbd> connect &nbsp;
+                    <kbd>p</kbd> print &nbsp;
+                    <kbd>a</kbd> add &nbsp;
+                    <kbd>e</kbd> edit &nbsp;
+                    <kbd>r</kbd> remove &nbsp;
+                    <kbd>tab</kbd> hosts/tunnels &nbsp;
+                    <kbd>/</kbd> filter &nbsp;
+                    <kbd>?</kbd> help &nbsp;
+                    <kbd>q</kbd> quit
+                  </span>
+                </div>
               </div>
-
-              <div class="terminal-grid">
-                <section class="term-panel focused" aria-labelledby="hosts-title">
-                  <div class="term-title" id="hosts-title">HOSTS</div>
-                  <div class="term-line group">▸ recent</div>
-                  <div class="term-line selected">
-                    <span class="host-name">&gt; web-prod</span>
-                    <span>deploy@203.0.113.21:22</span>
-                  </div>
-                  <div class="term-line">
-                    <span class="host-name">api-stage</span>
-                    <span class="target">ops@198.51.100.14:22</span>
-                  </div>
-                  <div class="term-line">
-                    <span class="host-name">cache-dev</span>
-                    <span class="target">dev@10.0.4.18:22</span>
-                  </div>
-                  <div class="term-line">
-                    <span class="host-name">bastion</span>
-                    <span class="target">ubuntu@192.0.2.8:22</span>
-                  </div>
-                  <br>
-                  <div class="term-line group">▸ all</div>
-                  <div class="term-line">
-                    <span class="host-name">db-prod</span>
-                    <span class="target">db@198.51.100.30:22</span>
-                  </div>
-                  <div class="term-line">
-                    <span class="host-name">monitoring</span>
-                    <span class="target">ops@198.51.100.40:22</span>
-                  </div>
-                </section>
-
-                <section class="term-panel" aria-labelledby="tunnels-title">
-                  <div class="term-title" id="tunnels-title">TUNNELS</div>
-                  <div class="term-line">
-                    <span class="tunnel-name">db-local</span>
-                    <span class="running">running</span>
-                    <span class="tunnel-target">localhost:5432 -&gt; 10.0.4.20:5432</span>
-                  </div>
-                  <div class="term-line">
-                    <span class="tunnel-name">redis</span>
-                    <span class="muted">stopped</span>
-                    <span class="tunnel-target">localhost:6379 -&gt; 10.0.4.21:6379</span>
-                  </div>
-                </section>
-              </div>
-
-              <section class="term-panel details" aria-labelledby="details-title">
-                <div class="term-title" id="details-title">DETAILS</div>
-                <div class="detail-name">web-prod</div>
-                <div class="detail-row">
-                  <span class="detail-label">Host:</span>
-                  <span class="detail-value">203.0.113.21</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">User:</span>
-                  <span class="detail-value">deploy</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">Port:</span>
-                  <span class="detail-value">22</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">Identity file:</span>
-                  <span class="detail-value">~/.ssh/work_key</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">Password:</span>
-                  <span class="muted">not set</span>
-                </div>
-                <div class="preview-line">ssh -p 22 -i ~/.ssh/work_key deploy@203.0.113.21</div>
-              </section>
-
-              <footer class="footer">
-                <div>Ready.</div>
-                <div>enter/c connect • p print • a add • e edit • r remove • tab hosts/tunnels • / filter • ? help • q quit</div>
-              </footer>
             </div>
           </div>
         </section>
 
-        <section class="features" id="features" aria-label="sshuttlebox features">
-          <article class="feature">
-            <div class="feature-icon" aria-hidden="true">
-              <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <section class="features" id="features" aria-label="Features">
+          <article class="card">
+            <div class="num" aria-hidden="true">
+              <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
                 <rect x="5" y="6" width="22" height="20" rx="3" stroke="currentColor" stroke-width="2"/>
                 <path d="M5 14h22M11 10h2M18 10h2M11 20h2M18 20h2" stroke="#5fafff" stroke-width="2" stroke-linecap="round"/>
               </svg>
             </div>
-            <div>
-              <h2>Saved hosts</h2>
-              <p>Organize and label your SSH hosts. Quick to find, easy to connect.</p>
-            </div>
+            <h2>Saved hosts</h2>
+            <p>Organize SSH targets under short names with groups, identity files, and ports. Connect with one command.</p>
+            <span class="tag mono">shbx connect prod</span>
           </article>
-
-          <article class="feature">
-            <div class="feature-icon" aria-hidden="true">
-              <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <article class="card">
+            <div class="num" aria-hidden="true">
+              <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
                 <path d="M23 6h5v5M28 6 18 16M9 26H4v-5M4 26l10-10" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
                 <path d="M9 7c5.5 0 9 3.2 9 9s3.5 9 9 9" stroke="#5fafff" stroke-width="2" stroke-linecap="round"/>
               </svg>
             </div>
-            <div>
-              <h2>Port tunnels</h2>
-              <p>Local, remote, and SOCKS forwarding with status at a glance.</p>
-            </div>
+            <h2>Port tunnels</h2>
+            <p>Local, remote, and SOCKS forwarding with persistent definitions. Start, stop, and watch status at a glance.</p>
+            <span class="tag mono">shbx tunnel start db</span>
           </article>
-
-          <article class="feature">
-            <div class="feature-icon" aria-hidden="true">
-              <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <article class="card">
+            <div class="num" aria-hidden="true">
+              <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
                 <path d="m8 10 6 6-6 6M17 22h8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </div>
-            <div>
-              <h2>Shell completion</h2>
-              <p>Faster typing with completions for hosts, tunnels, and commands.</p>
-            </div>
+            <h2>Shell completion</h2>
+            <p>One-command install for bash, zsh, and fish. Autocomplete saved hosts and tunnels at the prompt.</p>
+            <span class="tag mono">shbx completion install</span>
           </article>
         </section>
       </main>
+
+      <footer class="site-footer">
+        <span>macOS &amp; Linux</span>
+        <a href="https://github.com/itaprac/sshuttlebox">github.com/itaprac/sshuttlebox</a>
+      </footer>
     </div>
+
     <script>
-      const installCommand = document.querySelector(".install-command");
-      let copyTimer;
-
-      installCommand?.addEventListener("click", async () => {
-        const command = installCommand.dataset.copy;
-
-        try {
-          await navigator.clipboard.writeText(command);
-        } catch {
-          // Keep the UI calm even if clipboard access is unavailable.
-        }
-
-        window.clearTimeout(copyTimer);
-        installCommand.classList.remove("copied");
-        void installCommand.offsetWidth;
-        installCommand.classList.add("copied");
-        copyTimer = window.setTimeout(() => {
-          installCommand.classList.remove("copied");
-        }, 1800);
+      const btn = document.querySelector(".install");
+      let t;
+      btn?.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(btn.dataset.copy); } catch {}
+        clearTimeout(t);
+        btn.classList.remove("copied");
+        void btn.offsetWidth;
+        btn.classList.add("copied");
+        t = setTimeout(() => btn.classList.remove("copied"), 1700);
       });
     </script>
   </body>
