@@ -1,843 +1,1220 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="sshuttlebox is a small terminal SSH host and tunnel manager.">
-    <title>sshuttlebox — SSH hosts and tunnels, kept tidy.</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="sshuttlebox is a small SSH host and tunnel manager for your terminal." />
+    <meta name="color-scheme" content="dark" />
+    <title>sshuttlebox — SSH hosts and tunnels, kept tidy</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root {
-        /* palette lifted straight from the original site */
-        --bg: #030406;
-        --bg-soft: #050609;
-        --panel: #0a0b10;
-        --panel-2: #0d0e14;
-        --chrome: #101116;
-        --border: #3a3a41;
-        --line: rgba(255, 255, 255, 0.10);
-        --line-strong: rgba(255, 255, 255, 0.22);
-        --text: #f4f1ff;
-        --text-soft: #d8d3e0;
-        --muted: #8a8a91;
-        --dim: #5f5f66;
-
-        --blue: #5f87ff;
-        --cyan: #5fafff;
-        --green: #00d787;
-        --violet: #5f5fff;
-        --purple: #875fff;
-        --lavender: #af87ff;
-        --pink: #ff87ff;
-
-        --shadow-violet: rgba(95, 95, 255, 0.45);
-        --shadow-purple: rgba(135, 95, 255, 0.45);
-        --shadow-pink: rgba(255, 135, 255, 0.32);
+        --bg: #0b0d10;
+        --bg-2: #111418;
+        --panel: #13171c;
+        --panel-2: #181d23;
+        --border: #232a31;
+        --border-soft: #1a2026;
+        --text: #e6edf3;
+        --text-soft: #b4bdc6;
+        --muted: #7d8590;
+        --dim: #545d66;
+        --accent: #6ee7b7;
+        --accent-soft: #34d399;
+        --blue: #79b8ff;
+        --yellow: #f0c674;
+        --magenta: #d6acff;
+        --red: #ff7b72;
+        --shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 8px 32px rgba(0, 0, 0, 0.5);
+        --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       }
 
-      * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
+
       html {
-        color-scheme: dark;
-        scroll-behavior: smooth;
-        background: var(--bg);
+        scroll-padding-top: 24px;
       }
+
+      html,
       body {
-        min-width: 320px;
-        min-height: 100vh;
-        min-height: 100dvh;
-        margin: 0;
-        overflow-x: clip;
-        color: var(--text);
-        background:
-          radial-gradient(circle at 18% 22%, rgba(95, 95, 255, 0.16), transparent 30rem),
-          radial-gradient(circle at 84% 14%, rgba(255, 135, 255, 0.10), transparent 32rem),
-          linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 58%, #020203 100%);
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", Helvetica, Arial, sans-serif;
-        font-size: 17px;
-        line-height: 1.55;
-        -webkit-font-smoothing: antialiased;
-      }
-      body::before {
-        position: fixed;
-        inset: 0;
-        z-index: -1;
-        content: "";
-        pointer-events: none;
-        background-image:
-          linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
-        background-size: 72px 72px;
-        mask-image: linear-gradient(to bottom, black, transparent 88%);
-      }
-
-      .mono {
-        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
-          "Liberation Mono", Menlo, monospace;
-      }
-      a { color: inherit; text-decoration: none; }
-
-      .page {
-        width: min(100%, 1640px);
-        margin: 0 auto;
-        padding: 0 2.5rem;
-      }
-
-      /* --- header --- */
-      .site-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        padding: 1.75rem 0;
-      }
-      .brand {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.75rem;
-        font-weight: 800;
-        font-size: 1.25rem;
-        letter-spacing: -0.02em;
-      }
-      .brand-tag {
-        padding: 0.32rem 0.65rem;
-        border-radius: 6px;
-        background: linear-gradient(135deg, var(--violet), var(--pink));
-        color: var(--text);
-        font-size: 0.8rem;
-        font-weight: 700;
-        letter-spacing: 0.12em;
-        box-shadow: 2px 2px 0 var(--purple);
-      }
-      .nav {
-        display: flex;
-        align-items: center;
-        gap: 1.6rem;
-        color: var(--text-soft);
-        font-size: 1rem;
-        font-weight: 500;
-      }
-      .nav-gh {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.2rem 0.45rem;
-        margin-right: 0.25rem;
-        border-radius: 6px;
-        transition: color 160ms ease, background-color 160ms ease;
-      }
-      .nav-gh svg {
-        display: block;
-        flex: none;
-        width: 20px;
-        height: 20px;
-        overflow: visible;
-      }
-      .nav-gh:hover {
-        color: var(--pink);
-        background-color: rgba(255, 255, 255, 0.04);
-      }
-
-      main { padding: 3rem 0 4.5rem; }
-
-      /* --- hero --- */
-      .hero {
-        display: grid;
-        grid-template-columns: 0.85fr 1.25fr;
-        gap: clamp(2.4rem, 4vw, 4.5rem);
-        align-items: center;
-      }
-      .hero-copy { max-width: 42rem; }
-
-      .display {
-        margin: 0;
-        font-size: clamp(3rem, 6.2vw, 5.4rem);
-        font-weight: 800;
-        line-height: 1.02;
-        letter-spacing: -0.035em;
-      }
-      .display em {
-        font-style: normal;
-        background: linear-gradient(110deg, var(--blue), var(--violet), var(--lavender), var(--pink));
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-      }
-
-      .lead {
-        max-width: 36rem;
-        margin: 1.7rem 0 1.85rem;
-        color: var(--text-soft);
-        font-size: 1.22rem;
-        line-height: 1.55;
-      }
-      .lead strong {
-        font-weight: 700;
-        background: linear-gradient(110deg, var(--violet), var(--pink));
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-      }
-      .lead .kbd {
-        padding: 0.05rem 0.4rem;
-        border: 1.5px solid var(--lavender);
-        border-radius: 4px;
-        background: rgba(135, 95, 255, 0.10);
-        color: var(--lavender);
-        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
-          "Liberation Mono", Menlo, monospace;
-        font-size: 0.85em;
-      }
-
-      .actions { display: flex; flex-wrap: wrap; gap: 0.7rem; align-items: center; }
-
-      .install {
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.6rem;
-        max-width: 100%;
-        padding: 1rem 1.15rem;
-        border: 1.5px solid var(--lavender);
-        border-radius: 9px;
-        background: rgba(5, 5, 7, 0.84);
-        color: var(--text);
-        font: inherit;
-        font-size: 1rem;
-        text-align: left;
-        cursor: pointer;
-        box-shadow: 5px 5px 0 var(--violet);
-        transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
-      }
-      .install:hover {
-        transform: translate(-1px, -1px);
-        border-color: var(--pink);
-        box-shadow: 7px 7px 0 var(--pink);
-      }
-      .install:active { transform: translate(1px, 1px); box-shadow: 3px 3px 0 var(--violet); }
-      .install .prompt {
-        background: linear-gradient(135deg, var(--violet), var(--pink));
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-        font-weight: 800;
-      }
-      .install code {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
-          "Liberation Mono", Menlo, monospace;
-        font-size: 0.95rem;
-      }
-      .install .ico {
-        position: relative;
-        display: inline-grid;
-        place-items: center;
-        width: 1.15em;
-        height: 1.15em;
-        margin-left: 0.35rem;
-        color: var(--muted);
-        font-size: 1.1rem;
-        line-height: 1;
-      }
-      .install .ico > span {
-        grid-area: 1 / 1;
-        display: inline-block;
-        transition:
-          opacity 360ms cubic-bezier(0.4, 0, 0.2, 1),
-          transform 520ms cubic-bezier(0.4, 0, 0.2, 1);
-        will-change: opacity, transform;
-      }
-      .install .ico-check {
-        color: var(--green);
-        opacity: 0;
-        transform: scale(0.7);
-      }
-      .install.copied .ico-clip {
-        opacity: 0;
-        transform: scale(0.7);
-      }
-      .install.copied .ico-check {
-        opacity: 1;
-        transform: scale(1);
-      }
-
-      .copy-status {
-        position: absolute;
-        bottom: calc(100% + 0.55rem);
-        right: 0.25rem;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        padding: 0.4rem 0.75rem;
-        border-radius: 8px;
-        background: rgba(3, 4, 6, 0.96);
-        border: 1px solid rgba(0, 215, 135, 0.3);
-        box-shadow: 0 8px 24px rgba(0, 215, 135, 0.16);
-        color: var(--green);
-        font-size: 0.78rem;
-        font-weight: 600;
-        letter-spacing: 0.01em;
-        white-space: nowrap;
-        opacity: 0;
-        transform: translateY(4px);
-        pointer-events: none;
-        will-change: opacity, transform;
-      }
-      .copy-status::before {
-        content: "✓";
-        font-size: 0.82rem;
-        line-height: 1;
-        color: var(--green);
-      }
-      .install.copied .copy-status {
-        animation: copyFade 2400ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
-      }
-      @keyframes copyFade {
-        0%   { opacity: 0; transform: translateY(6px); }
-        22%  { opacity: 1; transform: translateY(0); }
-        78%  { opacity: 1; transform: translateY(0); }
-        100% { opacity: 0; transform: translateY(-4px); }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        .install .ico > span,
-        .install .copy-status {
-          transition: opacity 140ms ease !important;
-          animation: none !important;
-        }
-        .install.copied .copy-status { opacity: 1; transform: none; }
-      }
-
-      /* --- terminal card --- */
-      .term-wrap {
-        position: relative;
-        min-width: 0;
-      }
-      .term-wrap::after {
-        content: "";
-        position: absolute;
-        right: -1rem;
-        bottom: -1rem;
-        left: 1rem;
-        top: 60%;
-        z-index: -1;
-        border-radius: 14px;
-        background: radial-gradient(ellipse at top, var(--shadow-purple), transparent 70%);
-        filter: blur(40px);
-        pointer-events: none;
-      }
-
-      .term-card {
-        position: relative;
-        margin-right: 10px;
-        border: 1.5px solid var(--line-strong);
-        border-radius: 14px;
-        background: var(--chrome);
-        color: var(--text);
-        box-shadow:
-          10px 10px 0 var(--violet),
-          inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-        overflow: hidden;
-        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
-          "Liberation Mono", Menlo, monospace;
-        font-size: clamp(0.82rem, 0.95vw, 0.96rem);
-      }
-      .term-chrome {
-        display: flex;
-        align-items: center;
-        gap: 0.85rem;
-        height: 2.5rem;
-        padding: 0 1rem;
-        background: linear-gradient(180deg, #1a1c28, #11121b);
-        border-bottom: 1px solid var(--line);
-        color: var(--muted);
-        font-size: 0.85rem;
-      }
-      .dots { display: inline-flex; gap: 0.4rem; }
-      .dots span { width: 0.72rem; height: 0.72rem; border-radius: 50%; }
-      .dots span:nth-child(1) { background: #ff5f87; }
-      .dots span:nth-child(2) { background: #ffd75f; }
-      .dots span:nth-child(3) { background: var(--green); }
-      .term-chrome .title { flex: 1; text-align: center; }
-      .term-chrome .meta { color: var(--dim); font-size: 0.8rem; letter-spacing: 0.04em; }
-
-      .term-inner {
-        padding: 1.35rem;
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 22%),
-          var(--panel);
-      }
-
-      .term-banner {
-        display: flex;
-        align-items: flex-end;
-        gap: 1.2rem;
-        margin-bottom: 1.25rem;
-      }
-      .ascii {
-        margin: 0;
-        white-space: pre;
-        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
-          "Liberation Mono", Menlo, monospace;
-        font-size: clamp(0.55rem, 0.95vw, 0.92rem);
-        font-weight: 700;
-        line-height: 1;
-        letter-spacing: 0;
-        background: linear-gradient(90deg, var(--violet) 0%, var(--purple) 28%, var(--lavender) 56%, #d787ff 78%, var(--pink) 100%);
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-        filter: drop-shadow(2px 2px 0 var(--shadow-violet));
-      }
-      .banner-meta {
-        display: flex;
-        flex-direction: column;
-        gap: 0.2rem;
-        padding-bottom: 0.45rem;
-        color: var(--text-soft);
-        font-size: 0.95em;
-      }
-      .banner-meta .ver { color: var(--lavender); font-style: italic; }
-      .banner-meta .status::before {
-        content: "●";
-        margin-right: 0.4rem;
-        color: var(--green);
-      }
-
-      .term-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        grid-template-rows: auto auto;
-        gap: 0.85rem;
-      }
-      .panel {
-        min-width: 0;
-        padding: 0.95rem 1rem;
-        border: 1px solid var(--line);
-        border-radius: 7px;
-        background: var(--bg);
-      }
-      .panel.hosts {
-        grid-row: 1 / span 2;
-        min-height: 15rem;
-      }
-      .panel.tunnels {
-        grid-column: 2;
-        grid-row: 1;
-      }
-      .panel.details {
-        grid-column: 2;
-        grid-row: 2;
-      }
-      .panel.focused {
-        border-color: var(--purple);
-        box-shadow: 0 0 0 1px rgba(135, 95, 255, 0.25), 0 0 18px rgba(135, 95, 255, 0.20);
-      }
-      .panel-title {
-        margin-bottom: 0.8rem;
-        color: var(--blue);
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        font-size: 0.92em;
-      }
-      .focused .panel-title { color: var(--pink); }
-
-      .line, .detail-row, .preview-line {
-        display: flex;
-        gap: 0.9rem;
-        min-width: 0;
-        padding: 0.05rem 0.2rem;
-        color: #d8d5de;
-        line-height: 1.65;
-        white-space: nowrap;
-      }
-      .line.selected {
-        color: #ffffff;
-        background: var(--violet);
-      }
-      .line.selected .target { color: #ffffd7; }
-      .group { color: var(--lavender); font-weight: 800; }
-      .name { min-width: 7rem; }
-      .host, .target {
-        color: var(--muted);
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .on { color: var(--green); }
-      .off { color: var(--dim); }
-      .status-col { min-width: 5.5rem; }
-
-      .details { min-height: 0; }
-      .detail-name {
-        color: var(--lavender);
-        font-weight: 800;
-        font-size: 1.02em;
-        margin-bottom: 0.15rem;
-      }
-      .detail-row { line-height: 1.5; }
-      .detail-label { min-width: 6.5rem; color: var(--blue); }
-      .detail-value { color: #ece8f3; }
-      .preview-line { margin-top: 1rem; color: var(--dim); }
-      .preview-line::before { content: "$ "; color: var(--cyan); }
-
-      .term-footer {
-        display: flex;
-        justify-content: space-between;
-        gap: 1rem;
-        flex-wrap: wrap;
-        margin-top: 1rem;
-        color: var(--text-soft);
-        font-size: 0.85rem;
-      }
-      .term-footer kbd {
-        padding: 0.05rem 0.45rem;
-        border: 1px solid var(--line-strong);
-        border-radius: 3px;
-        background: rgba(255, 255, 255, 0.04);
-        color: var(--text);
-        font-family: inherit;
-        font-size: 0.82rem;
-      }
-      .term-footer .ready { color: var(--green); }
-
-      /* --- ASCII TUI panels (real lipgloss-style render) --- */
-      .tui-grid {
-        display: flex;
-        flex-direction: column;
-        gap: 0.35rem;
-        align-items: flex-start;
-        margin-bottom: 0.5rem;
-      }
-      .tui-row {
-        display: flex;
-        gap: 0.65rem;
-        flex-wrap: nowrap;
-        max-width: 100%;
-      }
-      .tui-panel {
         margin: 0;
         padding: 0;
-        white-space: pre;
-        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
-          "Liberation Mono", Menlo, monospace;
-        font-size: clamp(0.52rem, 0.72vw, 0.78rem);
-        line-height: 1.32;
-        color: #d8d5de;
       }
-      .tui-panel .b { color: rgba(255, 255, 255, 0.18); }
-      .tui-panel .b.f { color: var(--purple); }
-      .tui-panel .title { color: var(--blue); font-weight: 700; }
-      .tui-panel .title.focused { color: var(--pink); }
-      .tui-panel .group { color: var(--lavender); font-weight: 700; }
-      .tui-panel .sel { background: var(--violet); }
-      .tui-panel .sn { color: #ffffff; font-weight: 700; }
-      .tui-panel .st { color: #ffffd7; }
-      .tui-panel .host { color: var(--muted); }
-      .tui-panel .on { color: var(--green); }
-      .tui-panel .off { color: var(--dim); }
-      .tui-panel .label { color: var(--blue); }
-      .tui-panel .dname { color: var(--lavender); font-weight: 700; }
-      .tui-panel .dim { color: var(--dim); }
 
-      /* --- features --- */
-      .features {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 1.8rem;
-        margin-top: 5.5rem;
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 15px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        background-image:
+          radial-gradient(900px 500px at 80% -10%, rgba(110, 231, 183, 0.06), transparent 60%),
+          radial-gradient(700px 400px at -10% 10%, rgba(121, 184, 255, 0.05), transparent 60%);
+        background-attachment: fixed;
       }
-      .card {
-        position: relative;
-        padding: 2rem 1.85rem 2.15rem;
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 60%),
-          var(--panel);
-        border: 1.5px solid var(--line-strong);
-        border-radius: 14px;
-        transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
-      }
-      .card:nth-child(1) { box-shadow: 8px 8px 0 var(--violet); }
-      .card:nth-child(2) { box-shadow: 8px 8px 0 var(--pink); }
-      .card:nth-child(3) { box-shadow: 8px 8px 0 var(--green); }
-      .card:hover { transform: translate(-1px, -1px); border-color: rgba(255, 255, 255, 0.32); }
-      .card:nth-child(1):hover { box-shadow: 10px 10px 0 var(--violet); }
-      .card:nth-child(2):hover { box-shadow: 10px 10px 0 var(--pink); }
-      .card:nth-child(3):hover { box-shadow: 10px 10px 0 var(--green); }
 
-      .card .num {
-        display: inline-grid;
-        place-items: center;
-        width: 3.1rem;
-        height: 3.1rem;
-        margin-bottom: 1.15rem;
-        border: 2px solid currentColor;
-        border-radius: 8px;
-        box-shadow: inset 0 0 20px rgba(95, 95, 255, 0.14);
+      .wrap {
+        max-width: 1140px;
+        margin: 0 auto;
+        padding: 28px 24px 64px;
       }
-      .card .num svg { display: block; }
-      .card:nth-child(1) .num { color: var(--lavender); }
-      .card:nth-child(2) .num { color: var(--pink); box-shadow: inset 0 0 20px rgba(255, 135, 255, 0.14); }
-      .card:nth-child(3) .num { color: var(--green); box-shadow: inset 0 0 20px rgba(0, 215, 135, 0.14); }
 
-      .card h2 {
-        margin: 0 0 0.55rem;
-        font-size: 1.35rem;
-        font-weight: 700;
-        letter-spacing: -0.02em;
+      /* Nav */
+      header.nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 56px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-family: var(--mono);
+        font-weight: 600;
+        font-size: 15px;
+        letter-spacing: -0.01em;
+      }
+
+      .brand .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        background: var(--accent);
+        box-shadow: 0 0 12px rgba(110, 231, 183, 0.6);
+      }
+
+      .brand .slash {
+        color: var(--dim);
+      }
+
+      .nav-links {
+        display: flex;
+        gap: 22px;
+        align-items: center;
+        font-size: 14px;
+      }
+
+      .nav-links a {
+        color: var(--text-soft);
+        text-decoration: none;
+        transition: color 0.15s ease;
+      }
+
+      .nav-links a:hover {
         color: var(--text);
       }
-      .card p {
-        margin: 0;
-        color: var(--muted);
-        font-size: 1.04rem;
-        line-height: 1.55;
-      }
-      .card .tag {
-        display: inline-block;
-        margin-top: 1rem;
-        padding: 0.25rem 0.55rem;
-        border-radius: 5px;
-        background: rgba(95, 95, 255, 0.14);
-        color: var(--lavender);
-        font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
-          "Liberation Mono", Menlo, monospace;
-        font-size: 0.88rem;
-      }
-      .card:nth-child(2) .tag { background: rgba(255, 135, 255, 0.12); color: var(--pink); }
-      .card:nth-child(3) .tag { background: rgba(0, 215, 135, 0.12); color: var(--green); }
 
-      /* --- footer --- */
-      .site-footer {
+      .gh {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 6px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel);
+        transition: border-color 0.15s ease, background 0.15s ease;
+      }
+
+      .gh:hover {
+        border-color: #2f3942;
+        background: var(--panel-2);
+      }
+
+      .gh svg {
+        width: 15px;
+        height: 15px;
+      }
+
+      /* Hero */
+      .hero {
+        margin-bottom: 96px;
+      }
+
+      .hero-top {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 500px);
+        gap: 36px;
+        align-items: center;
+        margin-bottom: 64px;
+      }
+
+      section + section {
+        margin-top: 96px;
+      }
+
+      .hero-text {
+        min-width: 0;
+      }
+
+      .eyebrow {
+        display: inline-block;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--accent-soft);
+        background: rgba(52, 211, 153, 0.08);
+        border: 1px solid rgba(52, 211, 153, 0.18);
+        padding: 4px 10px;
+        border-radius: 999px;
+        margin-bottom: 18px;
+      }
+
+      h1 {
+        font-size: clamp(32px, 5vw, 46px);
+        line-height: 1.12;
+        letter-spacing: -0.02em;
+        margin: 0 0 18px;
+        font-weight: 600;
+      }
+
+      h1 .accent {
+        color: var(--accent);
+      }
+
+      .lede {
+        font-size: 18px;
+        line-height: 1.55;
+        color: var(--text-soft);
+        max-width: 620px;
+        margin: 0 0 28px;
+      }
+
+      .install {
+        display: flex;
+        align-items: stretch;
+        gap: 0;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        width: 100%;
+        min-width: 0;
+        overflow: hidden;
+        font-family: var(--mono);
+        font-size: 14px;
+        color: var(--text);
+        text-align: left;
+        padding: 0;
+        cursor: pointer;
+        transition: border-color 0.15s ease, background 0.15s ease;
+        position: relative;
+      }
+
+      .install:hover {
+        background: var(--panel-2);
+        border-color: var(--border);
+      }
+
+      .install:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .install .prompt {
+        padding: 12px 14px;
+        color: var(--accent);
+        border-right: 1px solid var(--border-soft);
+        user-select: none;
+      }
+
+      .install code {
+        flex: 1;
+        min-width: 0;
+        padding: 12px 14px;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-family: var(--mono);
+        font-size: 14px;
+      }
+
+      .install::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 8px;
+        border: 1px solid var(--accent-soft);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+
+      .install.copied::after {
+        opacity: 1;
+      }
+
+      .install .copied-flash {
+        position: absolute;
+        top: 50%;
+        right: 14px;
+        transform: translateY(-50%);
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.02em;
+        background: var(--panel);
+        padding: 2px 6px;
+        border-radius: 4px;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        pointer-events: none;
+      }
+
+      .install.copied .copied-flash {
+        opacity: 1;
+      }
+
+      .install.copied {
+        border-color: var(--accent-soft);
+      }
+
+      /* Terminal */
+      .term {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .tui-block {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+        gap: 48px;
+        align-items: center;
+        margin-top: 64px;
+        padding-top: 64px;
+        border-top: 1px solid var(--border-soft);
+      }
+
+      .tui-copy h3 {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin: 0 0 14px;
+      }
+
+      .tui-copy h2 {
+        font-size: 26px;
+        line-height: 1.2;
+        letter-spacing: -0.01em;
+        margin: 0 0 16px;
+        font-weight: 600;
+        color: var(--text);
+      }
+
+      .tui-copy p {
+        font-size: 15px;
+        line-height: 1.6;
+        color: var(--text-soft);
+        margin: 0;
+      }
+
+      .term-tui {
+        margin-top: 0;
+      }
+
+      .term-cli {
+        width: 100%;
+      }
+
+      .term-cli .term-body {
+        padding: 14px 18px;
+        font-size: 12px;
+        line-height: 1.7;
+      }
+
+      .term-cli .line {
+        display: block;
+        white-space: nowrap;
+      }
+
+      .term-cli .prompt {
+        color: var(--accent);
+        margin-right: 8px;
+      }
+
+      .term-cli .ok {
+        color: var(--accent-soft);
+        margin-right: 6px;
+      }
+
+      .term-cli .arg {
+        color: var(--blue);
+      }
+
+      .term-cli .flag {
+        color: var(--magenta);
+      }
+
+      .term-cli .str {
+        color: var(--accent);
+      }
+
+      .term-cli .dim {
+        color: var(--muted);
+      }
+
+      .term-cli .cursor {
+        display: inline-block;
+        width: 7px;
+        height: 13px;
+        background: var(--text-soft);
+        vertical-align: -2px;
+        margin-left: 2px;
+        animation: blink 1.1s steps(1) infinite;
+      }
+
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      .term-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        background: var(--bg-2);
+        border-bottom: 1px solid var(--border-soft);
+      }
+
+      .term-bar .lights {
+        display: flex;
+        gap: 6px;
+      }
+
+      .term-bar .light {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #3a4047;
+      }
+
+      .term-bar .light.r {
+        background: #ff5f57;
+      }
+      .term-bar .light.y {
+        background: #febc2e;
+      }
+      .term-bar .light.g {
+        background: #28c840;
+      }
+
+      .term-bar .title {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--muted);
+        margin-left: auto;
+        margin-right: auto;
+        padding-right: 60px;
+      }
+
+      .term-body {
+        font-family: var(--mono);
+        font-size: 13px;
+        padding: 18px 20px;
+        color: var(--text-soft);
+        line-height: 1.55;
+        overflow-x: auto;
+      }
+
+      .tui {
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        gap: 0;
+        background: var(--bg);
+        border: 1px solid var(--border-soft);
+        border-radius: 6px;
+        min-height: 260px;
+      }
+
+      .tui-side {
+        border-right: 1px solid var(--border-soft);
+        padding: 10px 0;
+      }
+
+      .tui-section {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--dim);
+        padding: 6px 14px 4px;
+      }
+
+      .tui-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 14px;
+        color: var(--text-soft);
+      }
+
+      .tui-row.active {
+        background: rgba(110, 231, 183, 0.08);
+        color: var(--text);
+        border-left: 2px solid var(--accent);
+        padding-left: 12px;
+      }
+
+      .tui-row .badge {
+        font-size: 10px;
+        color: var(--dim);
+      }
+
+      .tui-row .on {
+        color: var(--accent-soft);
+      }
+
+      .tui-row .off {
+        color: var(--dim);
+      }
+
+      .tui-main {
+        padding: 12px 16px;
+      }
+
+      .tui-main h4 {
+        margin: 0 0 8px;
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .tui-detail {
+        display: grid;
+        grid-template-columns: 88px 1fr;
+        row-gap: 4px;
+        font-size: 12.5px;
+      }
+
+      .tui-detail dt {
+        color: var(--muted);
+      }
+
+      .tui-detail dd {
+        margin: 0;
+        color: var(--text);
+      }
+
+      .tui-detail dd .v {
+        color: var(--blue);
+      }
+
+      .tui-status {
         display: flex;
         justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 1rem;
-        margin-top: 5rem;
-        padding: 2rem 0;
-        border-top: 1px solid var(--line);
+        padding: 8px 14px;
+        background: var(--bg-2);
+        border-top: 1px solid var(--border-soft);
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+
+      .tui-status .keys span {
+        color: var(--text-soft);
+        margin-right: 10px;
+      }
+
+      .tui-status .keys b {
+        color: var(--accent);
+        font-weight: 500;
+      }
+
+      .c-green {
+        color: var(--accent);
+      }
+      .c-blue {
+        color: var(--blue);
+      }
+      .c-yellow {
+        color: var(--yellow);
+      }
+      .c-magenta {
+        color: var(--magenta);
+      }
+      .c-muted {
+        color: var(--muted);
+      }
+      .c-dim {
         color: var(--dim);
-        font-size: 0.95rem;
       }
-      .site-footer a { color: var(--text-soft); font-weight: 500; }
-      .site-footer a:hover { color: var(--pink); }
 
-      /* --- responsive --- */
-      @media (max-width: 1180px) {
-        .hero { grid-template-columns: 1fr; gap: 2.75rem; }
-        .term-wrap { max-width: 56rem; margin: 0 auto; width: 100%; }
+      /* Sections */
+      section {
+        margin-top: 64px;
       }
-      @media (max-width: 840px) {
-        .features { grid-template-columns: 1fr; gap: 1.4rem; margin-top: 3.75rem; }
-        .term-grid {
+
+      .section-title {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin-bottom: 32px;
+      }
+
+      .section-title h2 {
+        font-size: 13px;
+        font-family: var(--mono);
+        font-weight: 500;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        margin: 0;
+      }
+
+      .section-title .line {
+        flex: 1;
+        height: 1px;
+        background: var(--border-soft);
+      }
+
+      /* Features */
+      .features {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1px;
+        background: var(--border-soft);
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .feature {
+        background: var(--panel);
+        padding: 20px;
+      }
+
+      .feature .icon {
+        font-family: var(--mono);
+        font-size: 16px;
+        color: var(--accent);
+        line-height: 1;
+        margin-bottom: 10px;
+      }
+
+      .feature .name {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--accent);
+        margin-bottom: 6px;
+      }
+
+      .feature .desc {
+        font-size: 14px;
+        color: var(--text-soft);
+        line-height: 1.5;
+      }
+
+      /* Commands */
+      .commands-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .command-group {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px 22px;
+      }
+
+      .command-group h3 {
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin: 0 0 14px;
+      }
+
+      .command-row {
+        display: grid;
+        grid-template-columns: 1fr;
+        padding: 8px 0;
+        border-top: 1px solid var(--border-soft);
+      }
+
+      .command-row:first-of-type {
+        border-top: 0;
+        padding-top: 4px;
+      }
+
+      .command-row code {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--text);
+        background: transparent;
+        padding: 0;
+      }
+
+      .command-row .desc {
+        font-size: 12.5px;
+        color: var(--muted);
+        margin-top: 4px;
+        line-height: 1.4;
+      }
+
+      .command-row code .arg {
+        color: var(--blue);
+      }
+
+      .command-row code .flag {
+        color: var(--magenta);
+      }
+
+      @media (max-width: 880px) {
+        .commands-grid {
           grid-template-columns: 1fr;
-          grid-template-rows: auto;
         }
-        .panel.hosts, .panel.tunnels, .panel.details {
-          grid-row: auto;
-          grid-column: auto;
-        }
-        .panel { min-height: 0; }
-        .panel.hosts { min-height: 0; }
-        .page { padding: 0 1.25rem; }
-      }
-      @media (max-width: 540px) {
-        main { padding: 1.75rem 0 3rem; }
-        .display { font-size: clamp(2.6rem, 11vw, 3.6rem); }
-        .install { padding: 0.85rem 0.95rem; font-size: 0.92rem; }
-        .install code { font-size: 0.82rem; }
       }
 
-      @media (prefers-reduced-motion: reduce) {
-        * { transition-duration: 0.01ms !important; }
+      /* Quick start */
+      .qs {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .qs .step {
+        display: grid;
+        grid-template-columns: 40px 1fr;
+        gap: 20px;
+        align-items: start;
+      }
+
+      .qs .n {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        margin-top: 4px;
+      }
+
+      .qs .step-body {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .qs .label {
+        color: var(--text-soft);
+        font-size: 15px;
+        line-height: 1.4;
+      }
+
+      .qs .code {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 18px;
+        font-family: var(--mono);
+        font-size: 13.5px;
+        line-height: 1.85;
+        color: var(--text);
+        overflow-x: auto;
+      }
+
+      .qs .code .line {
+        display: block;
+        white-space: nowrap;
+      }
+
+      .qs .p {
+        color: var(--accent);
+        user-select: none;
+        margin-right: 8px;
+      }
+
+      .qs .arg {
+        color: var(--blue);
+      }
+
+      .qs .flag {
+        color: var(--magenta);
+      }
+
+      .qs .cmt {
+        color: var(--dim);
+        margin-left: 8px;
+      }
+
+      /* Footer */
+      footer {
+        margin-top: 72px;
+        padding-top: 24px;
+        border-top: 1px solid var(--border-soft);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        color: var(--muted);
+        font-size: 13px;
+        text-align: center;
+      }
+
+      footer .config {
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      footer a {
+        color: var(--text-soft);
+        text-decoration: none;
+      }
+
+      footer a:hover {
+        color: var(--text);
+      }
+
+      @media (max-width: 880px) {
+        .features {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .hero-top {
+          grid-template-columns: 1fr;
+          gap: 24px;
+        }
+        .tui-block {
+          grid-template-columns: 1fr !important;
+          gap: 24px;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .wrap {
+          padding: 20px 16px 48px;
+        }
+        header.nav {
+          margin-bottom: 40px;
+        }
+        .nav-links a:not(.gh) {
+          display: none;
+        }
+        .tui {
+          grid-template-columns: 1fr;
+        }
+        .tui-side {
+          border-right: 0;
+          border-bottom: 1px solid var(--border-soft);
+        }
+        .features {
+          grid-template-columns: 1fr;
+        }
+        .install code {
+          font-size: 12.5px;
+        }
+        footer {
+          flex-direction: column;
+          align-items: flex-start;
+        }
       }
     </style>
   </head>
   <body>
-    <div class="page">
-      <header class="site-header">
-        <a class="brand" href="#" aria-label="sshuttlebox home">
-          <span class="brand-tag">SHBX</span>
+    <div class="wrap">
+      <header class="nav">
+        <div class="brand">
+          <span class="dot" aria-hidden="true"></span>
           <span>sshuttlebox</span>
-        </a>
-        <nav class="nav" aria-label="Primary">
-          <a class="nav-gh" href="https://github.com/itaprac/sshuttlebox">
-            <span>GitHub</span>
-            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+          <span class="slash">/</span>
+          <span style="color: var(--muted); font-weight: 400">shbx</span>
+        </div>
+        <nav class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#commands">Commands</a>
+          <a href="#quickstart">Quick start</a>
+          <a
+            class="gh"
+            href="https://github.com/itaprac/sshuttlebox"
+            target="_blank"
+            rel="noopener"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"
+              />
             </svg>
+            <span>GitHub</span>
           </a>
         </nav>
       </header>
 
-      <main>
-        <section class="hero" aria-labelledby="title">
-          <div class="hero-copy">
-            <h1 class="display" id="title">SSH hosts &amp; tunnels, <em>kept tidy.</em></h1>
-            <p class="lead">
-              Save hosts, group tunnels, preview commands, and jump in with
-              <strong>shbx</strong>. Local config, no servers — just your
-              terminal and a short <span class="kbd">$</span> away.
+      <section class="hero">
+        <div class="hero-top">
+          <div class="hero-text">
+            <h1>
+              SSH hosts and tunnels,<br />
+              <span class="accent">kept tidy.</span>
+            </h1>
+            <p class="lede">
+              A compact terminal manager for the SSH targets you actually use. Save hosts under short
+              names, organize them into groups, run local/remote/SOCKS tunnels, and connect with one
+              command — or browse everything from an interactive TUI.
             </p>
-            <div class="actions" id="install">
-              <button
-                type="button"
-                class="install"
-                data-copy="go install github.com/itaprac/sshuttlebox/cmd/shbx@latest"
-                aria-label="Copy install command"
-              >
-                <span class="prompt">$</span>
-                <code>go install github.com/itaprac/sshuttlebox/cmd/shbx@latest</code>
-                <span class="ico" aria-hidden="true">
-                  <span class="ico-clip">⎘</span>
-                  <span class="ico-check">✓</span>
-                </span>
-                <span class="copy-status" aria-live="polite">Copied!</span>
-              </button>
+
+            <button type="button" class="install" id="install" aria-label="Copy install command">
+              <span class="prompt" aria-hidden="true">$</span>
+              <code id="install-cmd">go install github.com/itaprac/sshuttlebox/cmd/shbx@latest</code>
+              <span class="copied-flash" aria-hidden="true">✓ Copied</span>
+            </button>
+          </div>
+
+          <div class="term term-cli" aria-label="shbx CLI preview">
+            <div class="term-bar">
+              <div class="lights" aria-hidden="true">
+                <span class="light r"></span>
+                <span class="light y"></span>
+                <span class="light g"></span>
+              </div>
+              <div class="title">zsh — shbx</div>
+            </div>
+            <div class="term-body">
+              <span class="line"><span class="prompt">❯</span>shbx config init</span>
+              <span class="line"><span class="ok">✓</span>Config initialized at <span class="dim">~/.config/sshuttlebox/config.json</span></span>
+              <span class="line"><span class="prompt">❯</span>shbx add <span class="arg">prod</span> <span class="flag">--host</span> 192.0.2.10 <span class="flag">--user</span> deploy</span>
+              <span class="line"><span class="ok">✓</span>Host <span class="str">"prod"</span> saved</span>
+              <span class="line"><span class="prompt">❯</span>shbx connect <span class="arg">prod</span></span>
+              <span class="line"><span class="dim">Welcome to Ubuntu 22.04.3 LTS</span></span>
+              <span class="line">deploy@prod:~$<span class="cursor"></span></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="tui-block">
+        <div class="term term-tui" aria-label="shbx terminal UI preview">
+          <div class="term-bar">
+            <div class="lights" aria-hidden="true">
+              <span class="light r"></span>
+              <span class="light y"></span>
+              <span class="light g"></span>
+            </div>
+            <div class="title">shbx — interactive ui</div>
+          </div>
+          <div class="term-body">
+            <div class="tui" aria-hidden="true">
+              <div class="tui-side">
+                <div class="tui-section">Hosts · work</div>
+                <div class="tui-row active">
+                  <span>prod</span><span class="badge">deploy@</span>
+                </div>
+                <div class="tui-row">
+                  <span>staging</span><span class="badge">deploy@</span>
+                </div>
+                <div class="tui-row">
+                  <span>jump</span><span class="badge">ec2-user@</span>
+                </div>
+                <div class="tui-section">Tunnels</div>
+                <div class="tui-row">
+                  <span>db</span><span class="on">● up</span>
+                </div>
+                <div class="tui-row">
+                  <span>socks</span><span class="off">○ down</span>
+                </div>
+                <div class="tui-row">
+                  <span>grafana</span><span class="off">○ down</span>
+                </div>
+              </div>
+              <div class="tui-main">
+                <h4>prod</h4>
+                <dl class="tui-detail">
+                  <dt>Host</dt>
+                  <dd><span class="v">192.0.2.10</span></dd>
+                  <dt>User</dt>
+                  <dd>deploy</dd>
+                  <dt>Port</dt>
+                  <dd>22</dd>
+                  <dt>Identity</dt>
+                  <dd class="c-muted">~/.ssh/id_ed25519</dd>
+                  <dt>Group</dt>
+                  <dd class="c-magenta">work</dd>
+                  <dt>Tunnels</dt>
+                  <dd><span class="c-green">db</span> <span class="c-dim">·</span> grafana</dd>
+                </dl>
+              </div>
+            </div>
+            <div class="tui-status" aria-hidden="true">
+              <div class="keys">
+                <span><b>↵</b> connect</span>
+                <span><b>e</b> edit</span>
+                <span><b>t</b> tunnel</span>
+                <span><b>:</b> palette</span>
+              </div>
+              <div>7 hosts · 3 tunnels · 1 running</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tui-copy">
+          <h3>Interactive UI</h3>
+          <h2>Everything you need,<br />without leaving the terminal.</h2>
+          <p>
+            Run <code style="font-family:var(--mono);color:var(--accent)">shbx</code> with no
+            arguments to launch the TUI. Browse hosts, start tunnels, and connect — all from a
+            single screen, with a command palette for any action.
+          </p>
+        </div>
+        </div>
+      </section>
+
+      <section id="features">
+        <div class="section-title">
+          <h2>Features</h2>
+          <span class="line"></span>
+        </div>
+        <div class="features">
+          <div class="feature">
+            <div class="icon">&gt;_</div>
+            <div class="name">Saved hosts</div>
+            <div class="desc">Connect to any SSH target by a short name. No more memorizing IPs, ports, and key paths.</div>
+          </div>
+          <div class="feature">
+            <div class="icon">◫</div>
+            <div class="name">Interactive TUI</div>
+            <div class="desc">Browse, filter, connect, and edit hosts from a terminal UI with a command palette.</div>
+          </div>
+          <div class="feature">
+            <div class="icon">⇄</div>
+            <div class="name">Tunnels</div>
+            <div class="desc">Local, remote, and SOCKS port forwarding with start/stop lifecycle management.</div>
+          </div>
+          <div class="feature">
+            <div class="icon">⊞</div>
+            <div class="name">Groups</div>
+            <div class="desc">Organize related hosts and tunnels into named groups for quick filtering.</div>
+          </div>
+          <div class="feature">
+            <div class="icon">⟳</div>
+            <div class="name">Shell completion</div>
+            <div class="desc">Bash, zsh, and fish completion for all saved host and tunnel names.</div>
+          </div>
+          <div class="feature">
+            <div class="icon">⚕</div>
+            <div class="name">Doctor checks</div>
+            <div class="desc">Inspect config, SSH availability, keys, and tunnel state with a single command.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="commands">
+        <div class="section-title">
+          <h2>Commands</h2>
+          <span class="line"></span>
+        </div>
+        <div class="commands-grid">
+          <div class="command-group">
+            <h3>Hosts</h3>
+            <div class="command-row">
+              <code>shbx add <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Save a new SSH host</span>
+            </div>
+            <div class="command-row">
+              <code>shbx list</code>
+              <span class="desc">List all saved hosts</span>
+            </div>
+            <div class="command-row">
+              <code>shbx connect <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Open an SSH session</span>
+            </div>
+            <div class="command-row">
+              <code>shbx edit <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Update a host's fields</span>
+            </div>
+            <div class="command-row">
+              <code>shbx remove <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Delete a saved host</span>
             </div>
           </div>
 
-          <div class="term-wrap">
-            <div class="term-card" aria-label="shbx terminal UI preview">
-              <div class="term-chrome" aria-hidden="true">
-                <span class="dots"><span></span><span></span><span></span></span>
-                <span class="title">shbx ui — sshuttlebox</span>
-                <span class="meta">~/dev</span>
-              </div>
-              <div class="term-inner">
-                <div class="term-banner">
-<pre class="ascii" aria-hidden="true"> ███████╗██╗  ██╗██████╗ ██╗  ██╗
- ██╔════╝██║  ██║██╔══██╗╚██╗██╔╝
- ███████╗███████║██████╔╝ ╚███╔╝
- ╚════██║██╔══██║██╔══██╗ ██╔██╗
- ███████║██║  ██║██████╔╝██╔╝ ██╗
- ╚══════╝╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝</pre>
-                  <div class="banner-meta">
-                    <span class="ver">sshuttlebox 0.3.2</span>
-                  </div>
-                </div>
+          <div class="command-group">
+            <h3>Tunnels</h3>
+            <div class="command-row">
+              <code>shbx tunnel add <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Define a new tunnel</span>
+            </div>
+            <div class="command-row">
+              <code>shbx tunnel list</code>
+              <span class="desc">List defined tunnels</span>
+            </div>
+            <div class="command-row">
+              <code>shbx tunnel start <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Bring a tunnel up</span>
+            </div>
+            <div class="command-row">
+              <code>shbx tunnel stop <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Tear a tunnel down</span>
+            </div>
+            <div class="command-row">
+              <code>shbx tunnel remove <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Delete a tunnel</span>
+            </div>
+          </div>
 
-                <div class="tui-grid" aria-label="shbx TUI render">
-                  <div class="tui-row">
-<pre class="tui-panel hosts">
-<span class="b f">╭────────────────────────────────────────────────╮</span>
-<span class="b f">│</span> <span class="title focused">HOSTS</span>                                          <span class="b f">│</span>
-<span class="b f">│</span>                                                <span class="b f">│</span>
-<span class="b f">│</span> <span class="group">▸ work</span>                                         <span class="b f">│</span>
-<span class="b f">│</span><span class="sel"> <span class="sn">&gt; web-prod</span>      <span class="st">deploy@203.0.113.21:22</span>         </span><span class="b f">│</span>
-<span class="b f">│</span>   api-stage     <span class="host">ops@198.51.100.14:22</span>           <span class="b f">│</span>
-<span class="b f">│</span>   bastion       <span class="host">ubuntu@192.0.2.8:22</span>            <span class="b f">│</span>
-<span class="b f">│</span>                                                <span class="b f">│</span>
-<span class="b f">│</span> <span class="group">▸ dev</span>                                          <span class="b f">│</span>
-<span class="b f">│</span>   cache-dev     <span class="host">dev@10.0.4.18:22</span>               <span class="b f">│</span>
-<span class="b f">│</span>   monitoring    <span class="host">ops@198.51.100.40:22</span>           <span class="b f">│</span>
-<span class="b f">│</span>                                                <span class="b f">│</span>
-<span class="b f">╰────────────────────────────────────────────────╯</span></pre>
-<pre class="tui-panel tunnels">
-<span class="b">╭────────────────────────────────────────────────╮</span>
-<span class="b">│</span> <span class="title">TUNNELS</span>                                        <span class="b">│</span>
-<span class="b">│</span>                                                <span class="b">│</span>
-<span class="b">│</span>   db-local  <span class="on">running</span>  <span class="host">:5432 → 10.0.4.20:5432</span>    <span class="b">│</span>
-<span class="b">│</span>   redis     <span class="off">stopped</span>  <span class="host">:6379 → 10.0.4.21:6379</span>    <span class="b">│</span>
-<span class="b">│</span>   socks     <span class="on">running</span>  <span class="host">:1080 (dynamic)</span>           <span class="b">│</span>
-<span class="b">│</span>                                                <span class="b">│</span>
-<span class="b">│</span>                                                <span class="b">│</span>
-<span class="b">│</span>                                                <span class="b">│</span>
-<span class="b">│</span>                                                <span class="b">│</span>
-<span class="b">│</span>                                                <span class="b">│</span>
-<span class="b">│</span>                                                <span class="b">│</span>
-<span class="b">╰────────────────────────────────────────────────╯</span></pre>
-                  </div>
-<pre class="tui-panel details">
-<span class="b">╭────────────────────────────────────────────────────────────────────────────────────────────────────╮</span>
-<span class="b">│</span> <span class="title">DETAILS</span>                                                                                            <span class="b">│</span>
-<span class="b">│</span>                                                                                                    <span class="b">│</span>
-<span class="b">│</span> <span class="dname">web-prod</span>                                                                                           <span class="b">│</span>
-<span class="b">│</span>                                                                                                    <span class="b">│</span>
-<span class="b">│</span> <span class="label">Host:</span>           203.0.113.21                                                                       <span class="b">│</span>
-<span class="b">│</span> <span class="label">User:</span>           deploy                                                                             <span class="b">│</span>
-<span class="b">│</span> <span class="label">Port:</span>           22                                                                                 <span class="b">│</span>
-<span class="b">│</span> <span class="label">Identity file:</span>  ~/.ssh/work_key                                                                    <span class="b">│</span>
-<span class="b">│</span> <span class="label">Group:</span>          work                                                                               <span class="b">│</span>
-<span class="b">│</span> <span class="label">Password:</span>       <span class="dim">—</span>                                                                                  <span class="b">│</span>
-<span class="b">│</span>                                                                                                    <span class="b">│</span>
-<span class="b">│</span> <span class="dim">ssh -p 22 -i ~/.ssh/work_key deploy@203.0.113.21</span>                                                   <span class="b">│</span>
-<span class="b">│</span>                                                                                                    <span class="b">│</span>
-<span class="b">╰────────────────────────────────────────────────────────────────────────────────────────────────────╯</span></pre>
-                </div>
+          <div class="command-group">
+            <h3>Config &amp; groups</h3>
+            <div class="command-row">
+              <code>shbx config init</code>
+              <span class="desc">Create the local config</span>
+            </div>
+            <div class="command-row">
+              <code>shbx group add <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Create a named group</span>
+            </div>
+            <div class="command-row">
+              <code>shbx group show <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Show group contents</span>
+            </div>
+            <div class="command-row">
+              <code>shbx doctor</code>
+              <span class="desc">Check config and SSH state</span>
+            </div>
+            <div class="command-row">
+              <code>shbx completion install</code>
+              <span class="desc">Install shell completion</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
-                <div class="term-footer">
-                  <span>
-                    <kbd>↵/c</kbd> connect &nbsp;
-                    <kbd>p</kbd> print &nbsp;
-                    <kbd>a</kbd> add &nbsp;
-                    <kbd>e</kbd> edit &nbsp;
-                    <kbd>r</kbd> remove &nbsp;
-                    <kbd>tab</kbd> hosts/tunnels &nbsp;
-                    <kbd>/</kbd> filter &nbsp;
-                    <kbd>?</kbd> help &nbsp;
-                    <kbd>q</kbd> quit
-                  </span>
-                </div>
+      <section id="quickstart">
+        <div class="section-title">
+          <h2>Quick start</h2>
+          <span class="line"></span>
+        </div>
+        <div class="qs">
+          <div class="step">
+            <span class="n">1</span>
+            <div class="step-body">
+              <div class="label">Install the binary</div>
+              <div class="code">
+                <span class="line"><span class="p">$</span>go install github.com/itaprac/sshuttlebox/cmd/shbx@latest</span>
               </div>
             </div>
           </div>
-        </section>
+          <div class="step">
+            <span class="n">2</span>
+            <div class="step-body">
+              <div class="label">Initialize config and add a host</div>
+              <div class="code">
+                <span class="line"><span class="p">$</span>shbx config init</span>
+                <span class="line"><span class="p">$</span>shbx add <span class="arg">prod</span> <span class="flag">--host</span> 192.0.2.10 <span class="flag">--user</span> deploy</span>
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <span class="n">3</span>
+            <div class="step-body">
+              <div class="label">Connect or open the TUI</div>
+              <div class="code">
+                <span class="line"><span class="p">$</span>shbx connect <span class="arg">prod</span></span>
+                <span class="line"><span class="p">$</span>shbx</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
-        <section class="features" id="features" aria-label="Features">
-          <article class="card">
-            <div class="num" aria-hidden="true">
-              <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
-                <rect x="5" y="6" width="22" height="20" rx="3" stroke="currentColor" stroke-width="2"/>
-                <path d="M5 14h22M11 10h2M18 10h2M11 20h2M18 20h2" stroke="#5fafff" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-            </div>
-            <h2>Saved hosts</h2>
-            <p>Organize SSH targets under short names with groups, identity files, and ports. Connect with one command.</p>
-            <span class="tag mono">shbx connect prod</span>
-          </article>
-          <article class="card">
-            <div class="num" aria-hidden="true">
-              <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
-                <path d="M23 6h5v5M28 6 18 16M9 26H4v-5M4 26l10-10" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M9 7c5.5 0 9 3.2 9 9s3.5 9 9 9" stroke="#5fafff" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-            </div>
-            <h2>Port tunnels</h2>
-            <p>Local, remote, and SOCKS forwarding with persistent definitions. Start, stop, and watch status at a glance.</p>
-            <span class="tag mono">shbx tunnel start db</span>
-          </article>
-          <article class="card">
-            <div class="num" aria-hidden="true">
-              <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
-                <path d="m8 10 6 6-6 6M17 22h8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </div>
-            <h2>Shell completion</h2>
-            <p>One-command install for bash, zsh, and fish. Autocomplete saved hosts and tunnels at the prompt.</p>
-            <span class="tag mono">shbx completion install</span>
-          </article>
-        </section>
-      </main>
-
-      <footer class="site-footer">
-        <span>macOS &amp; Linux</span>
-        <a href="https://github.com/itaprac/sshuttlebox">github.com/itaprac/sshuttlebox</a>
+      <footer>
+        <span>
+          MIT licensed ·
+          <a href="https://github.com/itaprac/sshuttlebox" target="_blank" rel="noopener"
+            >itaprac/sshuttlebox</a
+          >
+        </span>
       </footer>
     </div>
 
     <script>
-      const btn = document.querySelector(".install");
-      let t;
-      btn?.addEventListener("click", async () => {
-        try { await navigator.clipboard.writeText(btn.dataset.copy); } catch {}
-        clearTimeout(t);
-        btn.classList.remove("copied");
-        void btn.offsetWidth;
-        btn.classList.add("copied");
-        t = setTimeout(() => btn.classList.remove("copied"), 2400);
-      });
+      (function () {
+        document.querySelectorAll('a[href^="#"]').forEach(function (link) {
+          link.addEventListener("click", function (e) {
+            var id = link.getAttribute("href").slice(1);
+            if (!id) return;
+            var target = document.getElementById(id);
+            if (!target) return;
+            e.preventDefault();
+            var top = target.getBoundingClientRect().top + window.pageYOffset - 24;
+            var start = window.pageYOffset;
+            var distance = top - start;
+            var duration = Math.min(900, Math.max(400, Math.abs(distance) * 0.6));
+            var startTime = null;
+            function ease(t) {
+              return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+            }
+            function step(now) {
+              if (startTime === null) startTime = now;
+              var elapsed = now - startTime;
+              var t = Math.min(elapsed / duration, 1);
+              window.scrollTo(0, start + distance * ease(t));
+              if (t < 1) requestAnimationFrame(step);
+              else history.replaceState(null, "", "#" + id);
+            }
+            requestAnimationFrame(step);
+          });
+        });
+      })();
+
+      (function () {
+        var btn = document.getElementById("install");
+        var cmd = document.getElementById("install-cmd");
+        if (!btn || !cmd) return;
+        var timer;
+        btn.addEventListener("click", function () {
+          var text = cmd.textContent || "";
+          var done = function () {
+            btn.classList.add("copied");
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+              btn.classList.remove("copied");
+            }, 1600);
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done, done);
+          } else {
+            var r = document.createRange();
+            r.selectNode(cmd);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            try {
+              document.execCommand("copy");
+              done();
+            } catch (e) {}
+            sel.removeAllRanges();
+          }
+        });
+      })();
     </script>
   </body>
 </html>

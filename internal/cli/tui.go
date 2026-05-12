@@ -110,6 +110,7 @@ type tuiModel struct {
 	tunnelName   string
 	outputTitle  string
 	showDetails  bool
+	hideDetails  bool
 
 	filter        textinput.Model
 	inputs        []textinput.Model
@@ -342,11 +343,14 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Filter):
 		return m.focusFilter()
 	case key.Matches(msg, m.keys.Details):
-		m.showDetails = !m.showDetails
-		if m.showDetails {
-			m.status = "Showing details."
-		} else {
+		if m.detailsVisible() {
+			m.showDetails = false
+			m.hideDetails = true
 			m.status = "Hiding details."
+		} else {
+			m.showDetails = true
+			m.hideDetails = false
+			m.status = "Showing details."
 		}
 		m.err = nil
 	case key.Matches(msg, m.keys.Palette):
@@ -800,9 +804,6 @@ func (m tuiModel) View() string {
 	}
 
 	parts := make([]string, 0, 6)
-	if banner := m.bannerView(); banner != "" {
-		parts = append(parts, banner, "")
-	}
 	parts = append(parts, body, "")
 	if footer != "" {
 		parts = append(parts, footer)
@@ -811,24 +812,6 @@ func (m tuiModel) View() string {
 		parts = append(parts, helpView)
 	}
 	return trimToHeight(lipgloss.JoinVertical(lipgloss.Left, parts...), m.height)
-}
-
-func (m tuiModel) bannerView() string {
-	if m.screen != tuiScreenMain {
-		return ""
-	}
-	if m.width > 0 && m.width < bannerMinWidth {
-		return ""
-	}
-	if m.height > 0 && m.height < bannerMinHeight {
-		return ""
-	}
-	return lipgloss.JoinHorizontal(
-		lipgloss.Bottom,
-		renderGradientBanner(),
-		"  ",
-		bannerTaglineStyle.Render("sshuttlebox "+Version)+"\n",
-	)
 }
 
 func (m tuiModel) showGlobalHelp() bool {
@@ -851,64 +834,8 @@ func (m tuiModel) mainBodyHeight() int {
 	if m.showGlobalHelp() {
 		used += 1
 	}
-	if banner := m.bannerView(); banner != "" {
-		used += lipgloss.Height(banner) + 1
-	}
 
 	return maxInt(4, m.height-used)
-}
-
-func renderGradientBanner() string {
-	lines := strings.Split(bannerArt, "\n")
-	width := 0
-	for _, line := range lines {
-		if w := lipgloss.Width(line); w > width {
-			width = w
-		}
-	}
-	if width == 0 {
-		return bannerStyle.Render(bannerArt)
-	}
-
-	out := make([]string, len(lines))
-	for li, line := range lines {
-		runes := []rune(line)
-		var b strings.Builder
-		segStart := 0
-		segColor := bannerColorAt(0, li, width)
-		for i := 1; i <= len(runes); i++ {
-			var nextColor lipgloss.Color
-			if i < len(runes) {
-				nextColor = bannerColorAt(i, li, width)
-			}
-			if i == len(runes) || nextColor != segColor {
-				style := lipgloss.NewStyle().Foreground(segColor).Bold(true)
-				b.WriteString(style.Render(string(runes[segStart:i])))
-				if i < len(runes) {
-					segStart = i
-					segColor = nextColor
-				}
-			}
-		}
-		out[li] = b.String()
-	}
-	return strings.Join(out, "\n")
-}
-
-func bannerColorAt(col, row, width int) lipgloss.Color {
-	if width <= 0 {
-		return bannerPalette[0]
-	}
-	pos := col + row
-	span := width + len(bannerPalette)
-	idx := pos * len(bannerPalette) / span
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= len(bannerPalette) {
-		idx = len(bannerPalette) - 1
-	}
-	return bannerPalette[idx]
 }
 
 func (m tuiModel) mainView() string {
@@ -925,95 +852,204 @@ func (m tuiModel) wideMainView() string {
 	}
 	contentWidth = maxInt(80, contentWidth)
 
-	gap := 2
-	// each panel adds 2 (border) + 2 (padding) = 4 cols of chrome
-	const panelChrome = 4
-	leftOuter := (contentWidth - gap) / 2
-	rightOuter := contentWidth - gap - leftOuter
-	leftInner := maxInt(20, leftOuter-panelChrome)
-	rightInner := maxInt(20, rightOuter-panelChrome)
-	bottomInner := maxInt(40, contentWidth-panelChrome)
-
-	hostsActive := m.mode == tuiModeHosts
 	bodyHeight := m.mainBodyHeight()
-	showDetails := m.showDetails || bodyHeight == 0 || bodyHeight >= detailsMinBodyHeight
-
-	detailsCard := ""
-	detailsHeight := 0
-	if showDetails {
-		detailsBody := m.detailsView(bottomInner)
-		if bodyHeight > 0 {
-			detailsBody = clampLines(detailsBody, maxInt(4, bodyHeight/3), 0)
-		}
-		detailsCard = m.wrapPanel(detailsBody, "DETAILS", bottomInner, false)
-		detailsHeight = lipgloss.Height(detailsCard)
-	}
-	listBodyMax := 0
+	shellWidth := maxInt(appShellMinWidth, contentWidth-appShellChrome)
+	sidebarWidth := wideSidebarWidth(shellWidth)
+	detailsWidth := shellWidth - sidebarWidth - 3
+	showDetails := m.detailsVisibleAtWidth(detailsWidth)
+	header := m.appHeaderView(shellWidth, bodyHeight == 0 || bodyHeight >= compactLogoMinBodyHeight)
+	contentHeight := 18
 	if bodyHeight > 0 {
-		listPanelHeight := bodyHeight - detailsHeight
-		listBodyMax = maxInt(1, listPanelHeight-panelFrameLines)
+		contentHeight = maxInt(1, bodyHeight-appShellFrameLines-lipgloss.Height(header))
 	}
 
-	hostsCard := m.wrapPanel(m.hostsPaneView(leftInner, hostsActive, listBodyMax), "HOSTS", leftInner, hostsActive)
-	tunnelsCard := m.wrapPanel(m.tunnelsPaneView(rightInner, !hostsActive, listBodyMax), "TUNNELS", rightInner, !hostsActive)
-	lists := lipgloss.JoinHorizontal(lipgloss.Top, hostsCard, strings.Repeat(" ", gap), tunnelsCard)
-
-	parts := []string{lists}
-	if detailsCard != "" {
-		parts = append(parts, detailsCard)
+	if !showDetails {
+		sidebar := m.sidebarView(shellWidth, contentHeight)
+		content := lipgloss.JoinVertical(lipgloss.Left, header, sidebar)
+		return appShellStyle.Width(shellWidth).Render(content)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+
+	detailsWidth = maxInt(detailsMinWidth, detailsWidth)
+	sidebar := m.sidebarView(sidebarWidth, contentHeight)
+	divider := verticalDivider(contentHeight)
+	details := m.detailsPaneView(detailsWidth, contentHeight)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, " ", divider, " ", details)
+	content := lipgloss.JoinVertical(lipgloss.Left, header, body)
+	return appShellStyle.Width(shellWidth).Render(content)
 }
 
 func (m tuiModel) narrowMainView() string {
 	contentWidth := maxInt(40, m.width-2)
-	const panelChrome = 4
-	innerWidth := maxInt(30, contentWidth-panelChrome)
+	shellWidth := maxInt(36, contentWidth-appShellChrome)
+	bodyHeight := m.mainBodyHeight()
+	header := m.appHeaderView(shellWidth, bodyHeight == 0 || bodyHeight >= compactLogoMinBodyHeight)
+	contentHeight := 12
+	if bodyHeight > 0 {
+		contentHeight = maxInt(1, bodyHeight-appShellFrameLines-lipgloss.Height(header))
+	}
 
 	hostsActive := m.mode == tuiModeHosts
-	bodyHeight := m.mainBodyHeight()
-	showDetails := m.showDetails || bodyHeight == 0 || bodyHeight >= detailsMinBodyHeight
+	showDetails := m.detailsVisibleAtWidth(shellWidth)
 
-	detailsCard := ""
-	detailsHeight := 0
+	listHeight := contentHeight
+	detailsBlock := ""
 	if showDetails {
-		detailsBody := m.detailsView(innerWidth)
-		if bodyHeight > 0 {
-			detailsBody = clampLines(detailsBody, maxInt(4, bodyHeight/3), 0)
+		detailsHeight := maxInt(4, contentHeight/3)
+		if detailsHeight+2 < contentHeight {
+			listHeight = contentHeight - detailsHeight - 1
+			detailsBlock = m.detailsPaneView(shellWidth, detailsHeight)
 		}
-		detailsCard = m.wrapPanel(detailsBody, "DETAILS", innerWidth, false)
-		detailsHeight = lipgloss.Height(detailsCard)
-	}
-	listBodyMax := 0
-	if bodyHeight > 0 {
-		listPanelHeight := bodyHeight - detailsHeight
-		listBodyMax = maxInt(1, listPanelHeight-panelFrameLines)
 	}
 
-	var listCard string
+	var listBlock string
 	if hostsActive {
-		listCard = m.wrapPanel(m.hostsPaneView(innerWidth, true, listBodyMax), "HOSTS", innerWidth, true)
+		listBlock = sidebarSectionView(m.sectionTitle("HOSTS", len(m.filteredItems())), m.hostsPaneView(shellWidth, true, maxInt(1, listHeight-1)), shellWidth, true, listHeight)
 	} else {
-		listCard = m.wrapPanel(m.tunnelsPaneView(innerWidth, true, listBodyMax), "TUNNELS", innerWidth, true)
+		listBlock = sidebarSectionView(m.sectionTitle("TUNNELS", len(m.filteredTunnelItems())), m.tunnelsPaneView(shellWidth, true, maxInt(1, listHeight-1)), shellWidth, true, listHeight)
 	}
 
-	parts := []string{listCard}
-	if detailsCard != "" {
-		parts = append(parts, detailsCard)
+	parts := []string{header, listBlock}
+	if detailsBlock != "" {
+		parts = append(parts, subtleDivider(shellWidth), detailsBlock)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return appShellStyle.Width(shellWidth).Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 
-func (m tuiModel) wrapPanel(body, title string, innerWidth int, focused bool) string {
-	titleStyleToUse := sectionTitleStyle
-	style := panelStyle
-	if focused {
-		titleStyleToUse = focusedTitleStyle
-		style = focusedPanelStyle
+func (m tuiModel) appHeaderView(width int, showLogo bool) string {
+	counts := mutedStyle.Render(fmt.Sprintf("%d hosts  %d tunnels", len(m.names), len(m.tunnelNames)))
+	if !showLogo || width < compactLogoMinWidth {
+		title := titleStyle.Render("SHBX")
+		padding := width - lipgloss.Width(title) - lipgloss.Width(counts)
+		if padding < 1 {
+			return fitRow("SHBX", width)
+		}
+		return title + strings.Repeat(" ", padding) + counts
 	}
-	header := titleStyleToUse.Render(title)
-	content := lipgloss.JoinVertical(lipgloss.Left, header, "", body)
-	return style.Width(innerWidth).Render(content)
+
+	lines := strings.Split(compactLogo, "\n")
+	for i, line := range lines {
+		if i == 0 {
+			plainCounts := fmt.Sprintf("%d hosts  %d tunnels", len(m.names), len(m.tunnelNames))
+			padding := width - lipgloss.Width(line) - lipgloss.Width(plainCounts)
+			if padding >= 2 {
+				lines[i] = titleStyle.Render(line) + strings.Repeat(" ", padding) + counts
+				continue
+			}
+		}
+		lines[i] = titleStyle.Render(fitRow(line, width))
+	}
+	lines = append(lines, subtleDivider(width))
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) detailsVisible() bool {
+	return m.detailsVisibleAtWidth(m.currentDetailsWidth())
+}
+
+func (m tuiModel) detailsVisibleAtWidth(shellWidth int) bool {
+	if m.showDetails {
+		return true
+	}
+	if m.hideDetails {
+		return false
+	}
+	if shellWidth > 0 && shellWidth < detailsMinWidth {
+		return false
+	}
+	bodyHeight := m.mainBodyHeight()
+	return bodyHeight == 0 || bodyHeight >= detailsMinBodyHeight
+}
+
+func (m tuiModel) currentDetailsWidth() int {
+	if m.width == 0 {
+		return appShellDefaultWidth - wideSidebarWidth(appShellDefaultWidth) - 3
+	}
+	contentWidth := maxInt(40, m.width-2)
+	if m.width < tuiNarrowWidth {
+		return maxInt(36, contentWidth-appShellChrome)
+	}
+	contentWidth = maxInt(80, contentWidth)
+	shellWidth := maxInt(appShellMinWidth, contentWidth-appShellChrome)
+	return shellWidth - wideSidebarWidth(shellWidth) - 3
+}
+
+func wideSidebarWidth(shellWidth int) int {
+	return maxInt(28, minInt(42, shellWidth/3))
+}
+
+func (m tuiModel) sidebarView(width, height int) string {
+	if height <= 0 {
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			sidebarSectionView(m.sectionTitle("HOSTS", len(m.filteredItems())), m.hostsPaneView(width, m.mode == tuiModeHosts), width, m.mode == tuiModeHosts, 0),
+			subtleDivider(width),
+			sidebarSectionView(m.sectionTitle("TUNNELS", len(m.filteredTunnelItems())), m.tunnelsPaneView(width, m.mode == tuiModeTunnels), width, m.mode == tuiModeTunnels, 0),
+		)
+	}
+
+	gap := 1
+	available := maxInt(2, height-gap)
+	hostHeight := available / 2
+	tunnelHeight := available - hostHeight
+	if m.mode == tuiModeHosts && available >= 8 {
+		hostHeight = available * 3 / 5
+		tunnelHeight = available - hostHeight
+	} else if m.mode == tuiModeTunnels && available >= 8 {
+		tunnelHeight = available * 3 / 5
+		hostHeight = available - tunnelHeight
+	}
+
+	hosts := sidebarSectionView(m.sectionTitle("HOSTS", len(m.filteredItems())), m.hostsPaneView(width, m.mode == tuiModeHosts, maxInt(1, hostHeight-1)), width, m.mode == tuiModeHosts, hostHeight)
+	tunnels := sidebarSectionView(m.sectionTitle("TUNNELS", len(m.filteredTunnelItems())), m.tunnelsPaneView(width, m.mode == tuiModeTunnels, maxInt(1, tunnelHeight-1)), width, m.mode == tuiModeTunnels, tunnelHeight)
+	return padBlockHeight(lipgloss.JoinVertical(lipgloss.Left, hosts, subtleDivider(width), tunnels), height)
+}
+
+func (m tuiModel) detailsPaneView(width, height int) string {
+	body := m.detailsView(width)
+	if height <= 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, detailsHeaderStyle.Render("DETAILS"), body)
+	}
+	bodyHeight := maxInt(1, height-1)
+	body = clampLines(body, bodyHeight, 0)
+	return sidebarSectionView("DETAILS", body, width, false, height)
+}
+
+func (m tuiModel) sectionTitle(title string, count int) string {
+	return fmt.Sprintf("%s %d", title, count)
+}
+
+func sidebarSectionView(title, body string, width int, focused bool, height int) string {
+	headerStyle := sectionHeaderStyle
+	if focused {
+		headerStyle = activeSectionHeaderStyle
+	}
+	header := headerStyle.Render(fitRow(title, width))
+	if height == 1 {
+		return header
+	}
+	if height > 1 {
+		body = clampLines(body, height-1, 0)
+		return padBlockHeight(lipgloss.JoinVertical(lipgloss.Left, header, body), height)
+	}
+	if body == "" {
+		return header
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, header, body)
+}
+
+func subtleDivider(width int) string {
+	return dividerStyle.Render(strings.Repeat("─", maxInt(1, width)))
+}
+
+func verticalDivider(height int) string {
+	if height <= 0 {
+		height = 1
+	}
+	lines := make([]string, height)
+	for i := range lines {
+		lines[i] = dividerStyle.Render("│")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m tuiModel) filterRowView() string {
@@ -2301,6 +2337,20 @@ func clampLines(value string, maxLines, focusLine int) string {
 	return strings.Join(out, "\n")
 }
 
+func padBlockHeight(value string, height int) string {
+	if height <= 0 {
+		return value
+	}
+	lines := strings.Split(value, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
 func wrapLongToken(value string, width int) string {
 	var lines []string
 	for lipgloss.Width(value) > width {
@@ -2349,65 +2399,54 @@ func maxInt(a, b int) int {
 }
 
 const (
-	bannerArt = `███████╗██╗  ██╗██████╗ ██╗  ██╗
-██╔════╝██║  ██║██╔══██╗╚██╗██╔╝
-███████╗███████║██████╔╝ ╚███╔╝
-╚════██║██╔══██║██╔══██╗ ██╔██╗
-███████║██║  ██║██████╔╝██╔╝ ██╗
-╚══════╝╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝`
-	bannerMinWidth       = 60
-	bannerMinHeight      = 30
-	detailsMinBodyHeight = 24
-	panelFrameLines      = 4
-	tuiNarrowWidth       = 100
+	compactLogo = ` ___ _  _ ___ __  __
+/ __| || | _ )\ \/ /
+\__ \ __ | _ \ >  <
+|___/_||_|___//_/\_\`
+
+	detailsMinBodyHeight     = 14
+	detailsMinWidth          = 58
+	compactLogoMinWidth      = 44
+	compactLogoMinBodyHeight = 14
+	appShellMinWidth         = 76
+	appShellDefaultWidth     = 110
+	appShellChrome           = 0
+	appShellFrameLines       = 2
+	tuiNarrowWidth           = 80
 )
 
 var (
-	panelStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("238")).
-			Padding(0, 1)
-	focusedPanelStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("99")).
-				Padding(0, 1)
-	sectionTitleStyle = lipgloss.NewStyle().
+	appShellStyle = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("236"))
+	sectionHeaderStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("69"))
-	focusedTitleStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("71"))
+	activeSectionHeaderStyle = lipgloss.NewStyle().
+					Bold(true).
+					Foreground(lipgloss.Color("40"))
+	detailsHeaderStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("213"))
+				Foreground(lipgloss.Color("71"))
+	dividerStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("236"))
 	subSectionStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("105")).
+			Foreground(lipgloss.Color("71")).
 			Bold(true)
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("63"))
-	bannerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("63")).
-			Bold(true)
-	bannerPalette = []lipgloss.Color{
-		lipgloss.Color("63"),
-		lipgloss.Color("99"),
-		lipgloss.Color("105"),
-		lipgloss.Color("141"),
-		lipgloss.Color("177"),
-		lipgloss.Color("213"),
-	}
-	bannerTaglineStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("69")).
-				Italic(true)
+			Foreground(lipgloss.Color("40"))
 	selectedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("63"))
+			Foreground(lipgloss.Color("194")).
+			Background(lipgloss.Color("22"))
 	selectedTargetStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("230")).
-				Background(lipgloss.Color("63"))
+				Foreground(lipgloss.Color("150")).
+				Background(lipgloss.Color("22"))
 	normalRowStyle = lipgloss.NewStyle()
 	mutedStyle     = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241"))
 	labelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("69"))
+			Foreground(lipgloss.Color("71"))
 	statusStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("42"))
+			Foreground(lipgloss.Color("40"))
 )

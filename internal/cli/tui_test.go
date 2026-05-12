@@ -463,7 +463,7 @@ func TestTUIViewStaysWithinSmallTerminalHeight(t *testing.T) {
 	}
 }
 
-func TestTUIViewPrioritizesListOverDetailsInShortTerminal(t *testing.T) {
+func TestTUIViewKeepsDetailsInModeratelyShortTerminal(t *testing.T) {
 	hosts := map[string]config.Host{}
 	for i := 0; i < 20; i++ {
 		name := fmt.Sprintf("host-%02d", i)
@@ -473,18 +473,86 @@ func TestTUIViewPrioritizesListOverDetailsInShortTerminal(t *testing.T) {
 		Version: 1,
 		Hosts:   hosts,
 	}, nil)
-	model.width = 88
+	model.width = 112
 	model.height = 20
 
 	view := model.View()
 	if got := strings.Count(view, "\n") + 1; got > model.height {
 		t.Fatalf("view height = %d, want <= %d; view %q", got, model.height, view)
 	}
-	if strings.Contains(view, "DETAILS") {
-		t.Fatalf("short terminal should prioritize list over details: %q", view)
+	if !strings.Contains(view, "DETAILS") {
+		t.Fatalf("moderately short terminal should keep details visible: %q", view)
 	}
-	if visibleHosts := strings.Count(view, "host-"); visibleHosts < 10 {
-		t.Fatalf("visible hosts = %d, want at least 10 in %q", visibleHosts, view)
+	if !strings.Contains(view, "host-00") {
+		t.Fatalf("moderately short terminal should keep selected host visible: %q", view)
+	}
+}
+
+func TestTUIViewUsesFullWideShellWidth(t *testing.T) {
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"mini": {Host: "100.124.218.15", User: "srv", Group: "home"},
+		},
+		Tunnels: map[string]config.Tunnel{
+			"db": {Host: "mini", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432},
+		},
+	}, nil)
+	model.width = 180
+	model.height = 24
+
+	view := model.View()
+	firstLine := strings.TrimRight(strings.Split(view, "\n")[0], " ")
+	if got, want := lipgloss.Width(firstLine), model.width; got != want {
+		t.Fatalf("wide shell width = %d, want %d; view %q", got, want, view)
+	}
+	if !strings.Contains(view, "DETAILS") {
+		t.Fatalf("wide shell should keep details visible: %q", view)
+	}
+}
+
+func TestTUIViewHidesDetailsWhenHorizontallyTight(t *testing.T) {
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"mini": {Host: "100.124.218.15", User: "srv", Group: "home"},
+		},
+		Tunnels: map[string]config.Tunnel{
+			"db": {Host: "mini", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432},
+		},
+	}, nil)
+	model.width = 88
+	model.height = 24
+
+	view := model.View()
+	if strings.Contains(view, "DETAILS") {
+		t.Fatalf("horizontally tight shell should hide details: %q", view)
+	}
+	firstLine := strings.TrimRight(strings.Split(view, "\n")[0], " ")
+	if got, want := lipgloss.Width(firstLine), model.width; got != want {
+		t.Fatalf("list-only shell width = %d, want %d; view %q", got, want, view)
+	}
+}
+
+func TestTUIViewKeepsDetailsNearMinimumUsableHeight(t *testing.T) {
+	hosts := map[string]config.Host{}
+	for i := 0; i < 20; i++ {
+		name := fmt.Sprintf("host-%02d", i)
+		hosts[name] = config.Host{Host: name + ".example"}
+	}
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts:   hosts,
+	}, nil)
+	model.width = 112
+	model.height = 16
+
+	view := model.View()
+	if got := strings.Count(view, "\n") + 1; got > model.height {
+		t.Fatalf("view height = %d, want <= %d; view %q", got, model.height, view)
+	}
+	if !strings.Contains(view, "DETAILS") {
+		t.Fatalf("near-minimum usable height should keep details visible: %q", view)
 	}
 }
 
@@ -501,9 +569,14 @@ func TestTUIViewCanToggleDetailsInShortTerminal(t *testing.T) {
 	model.width = 88
 	model.height = 20
 
+	view := model.View()
+	if strings.Contains(view, "DETAILS") {
+		t.Fatalf("horizontally tight terminal should hide details by default: %q", view)
+	}
+
 	updated, _ := model.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	model = updated.(tuiModel)
-	view := model.View()
+	view = model.View()
 	if got := strings.Count(view, "\n") + 1; got > model.height {
 		t.Fatalf("view height = %d, want <= %d; view %q", got, model.height, view)
 	}
