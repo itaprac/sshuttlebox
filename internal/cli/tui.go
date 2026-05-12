@@ -916,30 +916,40 @@ func (m tuiModel) narrowMainView() string {
 }
 
 func (m tuiModel) appHeaderView(width int, showLogo bool) string {
-	counts := mutedStyle.Render(fmt.Sprintf("%d hosts  %d tunnels", len(m.names), len(m.tunnelNames)))
-	if !showLogo || width < compactLogoMinWidth {
-		title := titleStyle.Render("SHBX")
-		padding := width - lipgloss.Width(title) - lipgloss.Width(counts)
+	counts := mutedStyle.Render(fmt.Sprintf("%d hosts  ·  %d tunnels", len(m.names), len(m.tunnelNames)))
+	icon := titleStyle.Render(appIconChar)
+	name := titleStyle.Render(appName)
+	dot := dividerStyle.Render(" · ")
+
+	if width < compactLogoMinWidth {
+		// Very narrow: icon + counts only.
+		left := icon + "  " + name
+		padding := width - lipgloss.Width(left) - lipgloss.Width(counts)
 		if padding < 1 {
-			return fitRow("SHBX", width)
+			return fitRow(appIconChar+" "+appName, width) + "\n" + subtleDivider(width)
 		}
-		return title + strings.Repeat(" ", padding) + counts
+		return left + strings.Repeat(" ", padding) + counts + "\n" + subtleDivider(width)
 	}
 
-	lines := strings.Split(compactLogo, "\n")
-	for i, line := range lines {
-		if i == 0 {
-			plainCounts := fmt.Sprintf("%d hosts  %d tunnels", len(m.names), len(m.tunnelNames))
-			padding := width - lipgloss.Width(line) - lipgloss.Width(plainCounts)
-			if padding >= 2 {
-				lines[i] = titleStyle.Render(line) + strings.Repeat(" ", padding) + counts
-				continue
-			}
-		}
-		lines[i] = titleStyle.Render(fitRow(line, width))
+	leftBlock := icon + "  " + name
+	if width >= headerVersionMinWidth {
+		leftBlock += "  " + mutedStyle.Render("v"+Version)
 	}
-	lines = append(lines, subtleDivider(width))
-	return strings.Join(lines, "\n")
+	leftBlock += dot + counts
+
+	if showLogo && width >= headerTaglineMinWidth {
+		tagline := mutedStyle.Render(appTagline)
+		padding := width - lipgloss.Width(leftBlock) - lipgloss.Width(tagline)
+		if padding >= 2 {
+			return leftBlock + strings.Repeat(" ", padding) + tagline + "\n" + subtleDivider(width)
+		}
+	}
+
+	padding := width - lipgloss.Width(leftBlock)
+	if padding < 0 {
+		padding = 0
+	}
+	return leftBlock + strings.Repeat(" ", padding) + "\n" + subtleDivider(width)
 }
 
 func (m tuiModel) detailsVisible() bool {
@@ -2399,15 +2409,16 @@ func maxInt(a, b int) int {
 }
 
 const (
-	compactLogo = ` ___ _  _ ___ __  __
-/ __| || | _ )\ \/ /
-\__ \ __ | _ \ >  <
-|___/_||_|___//_/\_\`
+	appIconChar = "▣"
+	appName     = "sshuttlebox"
+	appTagline  = "SSH hosts & tunnels, in your terminal"
 
 	detailsMinBodyHeight     = 14
 	detailsMinWidth          = 58
 	compactLogoMinWidth      = 44
 	compactLogoMinBodyHeight = 14
+	headerTaglineMinWidth    = 86
+	headerVersionMinWidth    = 50
 	appShellMinWidth         = 76
 	appShellDefaultWidth     = 110
 	appShellChrome           = 0
