@@ -23,7 +23,7 @@ import (
 	"golang.org/x/term"
 )
 
-const Version = "0.3.0"
+const Version = "0.3.1"
 
 const defaultSSHPort = 22
 
@@ -1884,9 +1884,20 @@ function __shbx_using_command
     test (count $cmd) -ge 2; and test $cmd[2] = $argv[1]
 end
 
+function __shbx_tunnel_needs_subcommand
+    set -l cmd (commandline -opc)
+    test (count $cmd) -eq 2; and test $cmd[2] = tunnel
+end
+
+function __shbx_tunnel_uses_name_command
+    set -l cmd (commandline -opc)
+    test (count $cmd) -eq 3; and test $cmd[2] = tunnel; and contains -- $cmd[3] show start stop remove
+end
+
 complete -c shbx -n '__shbx_needs_command' -a '(shbx __complete commands -- (commandline -ct))'
 complete -c shbx -n '__shbx_using_command connect; or __shbx_using_command show; or __shbx_using_command edit; or __shbx_using_command remove' -a '(shbx __complete hosts -- (commandline -ct))'
-complete -c shbx -n '__shbx_using_command tunnel' -a 'add list show start stop remove'
+complete -c shbx -n '__shbx_tunnel_needs_subcommand' -a 'add list show start stop remove'
+complete -c shbx -n '__shbx_tunnel_uses_name_command' -a '(shbx __complete tunnels -- (commandline -ct))'
 complete -c shbx -n '__shbx_using_command group' -a 'add list show remove rename'
 complete -c shbx -n '__shbx_using_command completion' -a 'bash zsh fish'
 `

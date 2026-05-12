@@ -511,6 +511,25 @@ func TestCompletionListsMatchingHosts(t *testing.T) {
 	}
 }
 
+func TestCompletionListsMatchingTunnels(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{Host: "prod.example"})
+	addTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+	addTunnel(t, "dev-db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 15432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+	addTunnel(t, "socks", config.Tunnel{Host: "prod", Type: "dynamic", LocalPort: 1080})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"__complete", "tunnels", "--", "d"}); err != nil {
+		t.Fatalf("complete tunnels: %v", err)
+	}
+
+	got := out.String()
+	if got != "db\ndev-db\n" {
+		t.Fatalf("completion output = %q, want %q", got, "db\ndev-db\n")
+	}
+}
+
 func TestDoctorReportsConfigAndWarnings(t *testing.T) {
 	home := withTempHome(t)
 	t.Setenv("SHBX_SSH_BIN", fakeSSHExitBinary(t, 0))
@@ -541,20 +560,81 @@ func TestDoctorReportsConfigAndWarnings(t *testing.T) {
 }
 
 func TestCompletionScriptMentionsHostCompletingCommands(t *testing.T) {
-	var out bytes.Buffer
-	app := App{in: strings.NewReader(""), out: &out}
-	if err := app.Run([]string{"completion", "zsh"}); err != nil {
-		t.Fatalf("completion zsh: %v", err)
+	tests := []struct {
+		shell string
+		want  []string
+	}{
+		{
+			shell: "bash",
+			want: []string{
+				"connect|show|edit|remove",
+				"shbx __complete hosts",
+				"shbx __complete tunnels",
+				"show\" || \"${COMP_WORDS[2]}\" = \"start\" || \"${COMP_WORDS[2]}\" = \"stop\" || \"${COMP_WORDS[2]}\" = \"remove",
+			},
+		},
+		{
+			shell: "zsh",
+			want: []string{
+				"#compdef shbx",
+				"connect|show|edit|remove",
+				"shbx __complete hosts",
+				"shbx __complete tunnels",
+				"[[ \"$words[3]\" == (show|start|stop|remove) ]]",
+			},
+		},
+		{
+			shell: "fish",
+			want: []string{
+				"__shbx_tunnel_needs_subcommand",
+				"__shbx_tunnel_uses_name_command",
+				"shbx __complete hosts",
+				"shbx __complete tunnels",
+				"contains -- $cmd[3] show start stop remove",
+			},
+		},
 	}
 
-	got := out.String()
-	for _, want := range []string{
-		"#compdef shbx",
-		"connect|show|edit|remove",
-		"shbx __complete hosts",
+	for _, tt := range tests {
+		t.Run(tt.shell, func(t *testing.T) {
+			var out bytes.Buffer
+			app := App{in: strings.NewReader(""), out: &out}
+			if err := app.Run([]string{"completion", tt.shell}); err != nil {
+				t.Fatalf("completion %s: %v", tt.shell, err)
+			}
+
+			got := out.String()
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("%s completion missing %q in %q", tt.shell, want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestInstalledCompletionScriptsIncludeTunnelNameCompletion(t *testing.T) {
+	home := withTempHome(t)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"completion", "install", "--shell", "all", "--no-rc"}); err != nil {
+		t.Fatalf("completion install all no-rc: %v", err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(home, ".local", "share", "shbx", "completions", "bash", "shbx"),
+		filepath.Join(home, ".local", "share", "shbx", "completions", "zsh", "_shbx"),
+		filepath.Join(home, ".config", "fish", "completions", "shbx.fish"),
 	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("zsh completion missing %q in %q", want, got)
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read completion file %s: %v", path, err)
+		}
+		if !strings.Contains(string(content), "shbx __complete tunnels") {
+			t.Fatalf("completion file %s missing tunnel name completion in %q", path, string(content))
 		}
 	}
 }
@@ -730,6 +810,23 @@ func addHost(t *testing.T, name string, host config.Host) {
 		t.Fatalf("load config: %v", err)
 	}
 	cfg.Hosts[name] = host
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+}
+
+func addTunnel(t *testing.T, name string, tunnel config.Tunnel) {
+	t.Helper()
+
+	path, _, err := config.Init()
+	if err != nil {
+		t.Fatalf("init config: %v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.Tunnels[name] = tunnel
 	if err := config.Save(path, cfg); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
