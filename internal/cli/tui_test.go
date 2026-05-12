@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -427,6 +428,97 @@ func TestTUIListsGroupHostsAndTunnels(t *testing.T) {
 	tunnels := model.tunnelsPaneView(60, true)
 	if !strings.Contains(tunnels, "work") || !strings.Contains(tunnels, "ungrouped") {
 		t.Fatalf("tunnels pane missing group sections: %q", tunnels)
+	}
+}
+
+func TestTUIViewStaysWithinSmallTerminalHeight(t *testing.T) {
+	hosts := map[string]config.Host{}
+	for i := 0; i < 40; i++ {
+		name := fmt.Sprintf("host-%02d", i)
+		hosts[name] = config.Host{Host: name + ".example"}
+	}
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts:   hosts,
+	}, nil)
+	model.width = 88
+	model.height = 12
+	model.cursor = 35
+
+	view := model.View()
+	if got := strings.Count(view, "\n") + 1; got > model.height {
+		t.Fatalf("view height = %d, want <= %d; view %q", got, model.height, view)
+	}
+	if !strings.Contains(view, "HOSTS") {
+		t.Fatalf("small terminal view should keep the active mode visible: %q", view)
+	}
+	if !strings.Contains(view, "host-35") {
+		t.Fatalf("small terminal view should keep the selected row visible: %q", view)
+	}
+	if !strings.Contains(view, "Ready.") {
+		t.Fatalf("small terminal view should keep the footer visible: %q", view)
+	}
+	if strings.Contains(view, "███████") {
+		t.Fatalf("small terminal view should not spend space on banner: %q", view)
+	}
+}
+
+func TestTUIViewPrioritizesListOverDetailsInShortTerminal(t *testing.T) {
+	hosts := map[string]config.Host{}
+	for i := 0; i < 20; i++ {
+		name := fmt.Sprintf("host-%02d", i)
+		hosts[name] = config.Host{Host: name + ".example"}
+	}
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts:   hosts,
+	}, nil)
+	model.width = 88
+	model.height = 20
+
+	view := model.View()
+	if got := strings.Count(view, "\n") + 1; got > model.height {
+		t.Fatalf("view height = %d, want <= %d; view %q", got, model.height, view)
+	}
+	if strings.Contains(view, "DETAILS") {
+		t.Fatalf("short terminal should prioritize list over details: %q", view)
+	}
+	if visibleHosts := strings.Count(view, "host-"); visibleHosts < 10 {
+		t.Fatalf("visible hosts = %d, want at least 10 in %q", visibleHosts, view)
+	}
+}
+
+func TestTUIViewCanToggleDetailsInShortTerminal(t *testing.T) {
+	hosts := map[string]config.Host{}
+	for i := 0; i < 20; i++ {
+		name := fmt.Sprintf("host-%02d", i)
+		hosts[name] = config.Host{Host: name + ".example", User: "deploy"}
+	}
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts:   hosts,
+	}, nil)
+	model.width = 88
+	model.height = 20
+
+	updated, _ := model.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	model = updated.(tuiModel)
+	view := model.View()
+	if got := strings.Count(view, "\n") + 1; got > model.height {
+		t.Fatalf("view height = %d, want <= %d; view %q", got, model.height, view)
+	}
+	if !strings.Contains(view, "DETAILS") {
+		t.Fatalf("short terminal should show details after d: %q", view)
+	}
+	if !strings.Contains(model.status, "Showing details") {
+		t.Fatalf("status = %q, want details status", model.status)
+	}
+
+	updated, _ = model.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	model = updated.(tuiModel)
+	view = model.View()
+	if strings.Contains(view, "DETAILS") {
+		t.Fatalf("short terminal should hide details after second d: %q", view)
 	}
 }
 

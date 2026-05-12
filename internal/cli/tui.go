@@ -109,6 +109,7 @@ type tuiModel struct {
 	connectName  string
 	tunnelName   string
 	outputTitle  string
+	showDetails  bool
 
 	filter        textinput.Model
 	inputs        []textinput.Model
@@ -139,6 +140,7 @@ type tuiKeyMap struct {
 	Remove    key.Binding
 	Switch    key.Binding
 	Filter    key.Binding
+	Details   key.Binding
 	Palette   key.Binding
 	ReuseKey  key.Binding
 	PickHost  key.Binding
@@ -160,6 +162,7 @@ func newTUIKeyMap() tuiKeyMap {
 		Remove:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "remove")),
 		Switch:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "hosts/tunnels")),
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		Details:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "details")),
 		Palette:   key.NewBinding(key.WithKeys(":", "ctrl+p"), key.WithHelp(":", "commands")),
 		ReuseKey:  key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "reuse key")),
 		PickHost:  key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "pick host")),
@@ -172,13 +175,13 @@ func newTUIKeyMap() tuiKeyMap {
 }
 
 func (k tuiKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Connect, k.Preview, k.Add, k.Edit, k.Remove, k.Switch, k.Filter, k.Palette, k.Help, k.Quit}
+	return []key.Binding{k.Connect, k.Preview, k.Add, k.Edit, k.Remove, k.Switch, k.Filter, k.Details, k.Palette, k.Help, k.Quit}
 }
 
 func (k tuiKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Connect, k.Preview},
-		{k.Add, k.Edit, k.Remove, k.Switch, k.Filter, k.Palette},
+		{k.Add, k.Edit, k.Remove, k.Switch, k.Filter, k.Details, k.Palette},
 		{k.ReuseKey, k.PickHost, k.PickGroup, k.Save, k.Cancel, k.Help, k.Quit},
 	}
 }
@@ -338,6 +341,14 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.toggleMode()
 	case key.Matches(msg, m.keys.Filter):
 		return m.focusFilter()
+	case key.Matches(msg, m.keys.Details):
+		m.showDetails = !m.showDetails
+		if m.showDetails {
+			m.status = "Showing details."
+		} else {
+			m.status = "Hiding details."
+		}
+		m.err = nil
 	case key.Matches(msg, m.keys.Palette):
 		return m.openPalette()
 	case key.Matches(msg, m.keys.Up):
@@ -780,7 +791,10 @@ func (m tuiModel) View() string {
 	if m.screen == tuiScreenPreview {
 		footer = ""
 	}
-	helpView := mutedStyle.Render(m.help.View(m.keys))
+	helpView := ""
+	if m.showGlobalHelp() {
+		helpView = mutedStyle.Render(m.help.View(m.keys))
+	}
 	if m.screen == tuiScreenPreview {
 		helpView = ""
 	}
@@ -796,7 +810,7 @@ func (m tuiModel) View() string {
 	if helpView != "" {
 		parts = append(parts, helpView)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return trimToHeight(lipgloss.JoinVertical(lipgloss.Left, parts...), m.height)
 }
 
 func (m tuiModel) bannerView() string {
@@ -815,6 +829,33 @@ func (m tuiModel) bannerView() string {
 		"  ",
 		bannerTaglineStyle.Render("sshuttlebox "+Version)+"\n",
 	)
+}
+
+func (m tuiModel) showGlobalHelp() bool {
+	if m.screen == tuiScreenPreview {
+		return false
+	}
+	if m.screen == tuiScreenMain && m.height > 0 && m.height < 18 {
+		return false
+	}
+	return true
+}
+
+func (m tuiModel) mainBodyHeight() int {
+	if m.height <= 0 {
+		return 0
+	}
+
+	used := 1 // blank line between body and footer
+	used++    // status footer
+	if m.showGlobalHelp() {
+		used += 1
+	}
+	if banner := m.bannerView(); banner != "" {
+		used += lipgloss.Height(banner) + 1
+	}
+
+	return maxInt(4, m.height-used)
 }
 
 func renderGradientBanner() string {
@@ -894,24 +935,33 @@ func (m tuiModel) wideMainView() string {
 	bottomInner := maxInt(40, contentWidth-panelChrome)
 
 	hostsActive := m.mode == tuiModeHosts
+	bodyHeight := m.mainBodyHeight()
+	showDetails := m.showDetails || bodyHeight == 0 || bodyHeight >= detailsMinBodyHeight
 
-	hostsCard := m.wrapPanel(
-		m.hostsPaneView(leftInner, hostsActive),
-		"HOSTS",
-		leftInner,
-		hostsActive,
-	)
-	tunnelsCard := m.wrapPanel(
-		m.tunnelsPaneView(rightInner, !hostsActive),
-		"TUNNELS",
-		rightInner,
-		!hostsActive,
-	)
+	detailsCard := ""
+	detailsHeight := 0
+	if showDetails {
+		detailsBody := m.detailsView(bottomInner)
+		if bodyHeight > 0 {
+			detailsBody = clampLines(detailsBody, maxInt(4, bodyHeight/3), 0)
+		}
+		detailsCard = m.wrapPanel(detailsBody, "DETAILS", bottomInner, false)
+		detailsHeight = lipgloss.Height(detailsCard)
+	}
+	listBodyMax := 0
+	if bodyHeight > 0 {
+		listPanelHeight := bodyHeight - detailsHeight
+		listBodyMax = maxInt(1, listPanelHeight-panelFrameLines)
+	}
+
+	hostsCard := m.wrapPanel(m.hostsPaneView(leftInner, hostsActive, listBodyMax), "HOSTS", leftInner, hostsActive)
+	tunnelsCard := m.wrapPanel(m.tunnelsPaneView(rightInner, !hostsActive, listBodyMax), "TUNNELS", rightInner, !hostsActive)
 	lists := lipgloss.JoinHorizontal(lipgloss.Top, hostsCard, strings.Repeat(" ", gap), tunnelsCard)
 
-	detailsCard := m.wrapPanel(m.detailsView(bottomInner), "DETAILS", bottomInner, false)
-
-	parts := []string{lists, detailsCard}
+	parts := []string{lists}
+	if detailsCard != "" {
+		parts = append(parts, detailsCard)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -921,17 +971,36 @@ func (m tuiModel) narrowMainView() string {
 	innerWidth := maxInt(30, contentWidth-panelChrome)
 
 	hostsActive := m.mode == tuiModeHosts
+	bodyHeight := m.mainBodyHeight()
+	showDetails := m.showDetails || bodyHeight == 0 || bodyHeight >= detailsMinBodyHeight
+
+	detailsCard := ""
+	detailsHeight := 0
+	if showDetails {
+		detailsBody := m.detailsView(innerWidth)
+		if bodyHeight > 0 {
+			detailsBody = clampLines(detailsBody, maxInt(4, bodyHeight/3), 0)
+		}
+		detailsCard = m.wrapPanel(detailsBody, "DETAILS", innerWidth, false)
+		detailsHeight = lipgloss.Height(detailsCard)
+	}
+	listBodyMax := 0
+	if bodyHeight > 0 {
+		listPanelHeight := bodyHeight - detailsHeight
+		listBodyMax = maxInt(1, listPanelHeight-panelFrameLines)
+	}
 
 	var listCard string
 	if hostsActive {
-		listCard = m.wrapPanel(m.hostsPaneView(innerWidth, true), "HOSTS", innerWidth, true)
+		listCard = m.wrapPanel(m.hostsPaneView(innerWidth, true, listBodyMax), "HOSTS", innerWidth, true)
 	} else {
-		listCard = m.wrapPanel(m.tunnelsPaneView(innerWidth, true), "TUNNELS", innerWidth, true)
+		listCard = m.wrapPanel(m.tunnelsPaneView(innerWidth, true, listBodyMax), "TUNNELS", innerWidth, true)
 	}
 
-	detailsCard := m.wrapPanel(m.detailsView(innerWidth), "DETAILS", innerWidth, false)
-
-	parts := []string{listCard, detailsCard}
+	parts := []string{listCard}
+	if detailsCard != "" {
+		parts = append(parts, detailsCard)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -961,102 +1030,104 @@ func (m tuiModel) panelFilterView(mode tuiMode) string {
 	return m.filterRowView()
 }
 
-func (m tuiModel) hostsPaneView(width int, focused bool) string {
+func (m tuiModel) hostsPaneView(width int, focused bool, maxLines ...int) string {
 	items := m.filteredItems()
 	prefix := m.panelFilterView(tuiModeHosts)
+	limit := optionalLineLimit(maxLines)
 	if len(items) == 0 {
 		message := "No saved hosts. Press a to add one."
 		if m.filter.Value() != "" && m.mode == tuiModeHosts {
 			message = "No matching hosts."
 		}
 		if prefix != "" {
-			return lipgloss.JoinVertical(lipgloss.Left, prefix, "", mutedStyle.Render(message))
+			return clampLines(lipgloss.JoinVertical(lipgloss.Left, prefix, "", mutedStyle.Render(message)), limit, 0)
 		}
-		return mutedStyle.Render(message)
+		return clampLines(mutedStyle.Render(message), limit, 0)
 	}
 
-	var b strings.Builder
+	lines := make([]string, 0, len(items)+4)
+	selectedLine := -1
 	if prefix != "" {
-		b.WriteString(prefix)
-		b.WriteString("\n\n")
+		lines = append(lines, prefix, "")
 	}
 	prevSection := "\x00"
 	for i, item := range items {
 		section := sectionLabel(item.group)
 		if section != prevSection {
 			if i > 0 {
-				b.WriteString("\n")
+				lines = append(lines, "")
 			}
-			b.WriteString(subSectionStyle.Render(section))
-			b.WriteString("\n")
+			lines = append(lines, subSectionStyle.Render(section))
 			prevSection = section
 		}
 		if i == m.cursor {
+			selectedLine = len(lines)
 			if focused {
 				line := hostRow(item, width-2, selectedTargetStyle)
-				b.WriteString(selectedStyle.Render(fitRow("> "+line, width)))
+				lines = append(lines, selectedStyle.Render(fitRow("> "+line, width)))
 			} else {
 				line := hostRow(item, width-2, mutedStyle)
-				b.WriteString(normalRowStyle.Render(fitRow("  "+line, width)))
+				lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
 			}
 		} else {
 			line := hostRow(item, width-2, mutedStyle)
-			b.WriteString(normalRowStyle.Render(fitRow("  "+line, width)))
-		}
-		if i < len(items)-1 {
-			b.WriteString("\n")
+			lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
 		}
 	}
-	return b.String()
+	if !focused {
+		selectedLine = 0
+	}
+	return clampLines(strings.Join(lines, "\n"), limit, selectedLine)
 }
 
-func (m tuiModel) tunnelsPaneView(width int, focused bool) string {
+func (m tuiModel) tunnelsPaneView(width int, focused bool, maxLines ...int) string {
 	items := m.filteredTunnelItems()
 	prefix := m.panelFilterView(tuiModeTunnels)
+	limit := optionalLineLimit(maxLines)
 	if len(items) == 0 {
 		message := "No saved tunnels. Press a to add one."
 		if m.filter.Value() != "" && m.mode == tuiModeTunnels {
 			message = "No matching tunnels."
 		}
 		if prefix != "" {
-			return lipgloss.JoinVertical(lipgloss.Left, prefix, "", mutedStyle.Render(message))
+			return clampLines(lipgloss.JoinVertical(lipgloss.Left, prefix, "", mutedStyle.Render(message)), limit, 0)
 		}
-		return mutedStyle.Render(message)
+		return clampLines(mutedStyle.Render(message), limit, 0)
 	}
 
-	var b strings.Builder
+	lines := make([]string, 0, len(items)+4)
+	selectedLine := -1
 	if prefix != "" {
-		b.WriteString(prefix)
-		b.WriteString("\n\n")
+		lines = append(lines, prefix, "")
 	}
 	prevSection := "\x00"
 	for i, item := range items {
 		section := sectionLabel(item.group)
 		if section != prevSection {
 			if i > 0 {
-				b.WriteString("\n")
+				lines = append(lines, "")
 			}
-			b.WriteString(subSectionStyle.Render(section))
-			b.WriteString("\n")
+			lines = append(lines, subSectionStyle.Render(section))
 			prevSection = section
 		}
 		if i == m.tunnelCursor {
+			selectedLine = len(lines)
 			if focused {
 				line := tunnelRow(item, width-2, selectedTargetStyle)
-				b.WriteString(selectedStyle.Render(fitRow("> "+line, width)))
+				lines = append(lines, selectedStyle.Render(fitRow("> "+line, width)))
 			} else {
 				line := tunnelRow(item, width-2, mutedStyle)
-				b.WriteString(normalRowStyle.Render(fitRow("  "+line, width)))
+				lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
 			}
 		} else {
 			line := tunnelRow(item, width-2, mutedStyle)
-			b.WriteString(normalRowStyle.Render(fitRow("  "+line, width)))
-		}
-		if i < len(items)-1 {
-			b.WriteString("\n")
+			lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
 		}
 	}
-	return b.String()
+	if !focused {
+		selectedLine = 0
+	}
+	return clampLines(strings.Join(lines, "\n"), limit, selectedLine)
 }
 
 func sectionLabel(group string) string {
@@ -2177,6 +2248,59 @@ func formatCommandBlock(command string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
+func trimToHeight(value string, height int) string {
+	if height <= 0 {
+		return value
+	}
+	lines := strings.Split(value, "\n")
+	if len(lines) <= height {
+		return value
+	}
+	return strings.Join(lines[:height], "\n")
+}
+
+func optionalLineLimit(values []int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	return values[0]
+}
+
+func clampLines(value string, maxLines, focusLine int) string {
+	if maxLines <= 0 {
+		return value
+	}
+	lines := strings.Split(value, "\n")
+	if len(lines) <= maxLines {
+		return value
+	}
+	if focusLine < 0 {
+		focusLine = 0
+	}
+	if focusLine >= len(lines) {
+		focusLine = len(lines) - 1
+	}
+
+	start := focusLine - maxLines/2
+	if start < 0 {
+		start = 0
+	}
+	if start+maxLines > len(lines) {
+		start = len(lines) - maxLines
+	}
+
+	out := append([]string(nil), lines[start:start+maxLines]...)
+	if maxLines >= 3 {
+		if start > 0 {
+			out[0] = mutedStyle.Render("...")
+		}
+		if start+maxLines < len(lines) {
+			out[len(out)-1] = mutedStyle.Render("...")
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
 func wrapLongToken(value string, width int) string {
 	var lines []string
 	for lipgloss.Width(value) > width {
@@ -2231,9 +2355,11 @@ const (
 ╚════██║██╔══██║██╔══██╗ ██╔██╗
 ███████║██║  ██║██████╔╝██╔╝ ██╗
 ╚══════╝╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝`
-	bannerMinWidth  = 60
-	bannerMinHeight = 24
-	tuiNarrowWidth  = 100
+	bannerMinWidth       = 60
+	bannerMinHeight      = 30
+	detailsMinBodyHeight = 24
+	panelFrameLines      = 4
+	tuiNarrowWidth       = 100
 )
 
 var (
