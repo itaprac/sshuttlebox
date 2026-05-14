@@ -103,6 +103,7 @@ Check local setup health:
 
 ```bash
 shbx doctor
+shbx doctor --fix
 ```
 
 ## Usage
@@ -158,7 +159,7 @@ shbx group show work
 | `shbx tunnel ...` | Add, list, show, start, stop, or remove SSH tunnels |
 | `shbx group ...` | Add, list, show, rename, or remove groups |
 | `shbx completion ...` | Generate or install shell completion |
-| `shbx doctor` | Check config, SSH, keys, and tunnels |
+| `shbx doctor` | Check or repair config, SSH, keys, and tunnels |
 | `shbx config ...` | Initialize or inspect the local config |
 | `shbx version` | Print the installed version |
 | `shbx help` | Show the full command reference |

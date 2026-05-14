@@ -1606,6 +1606,7 @@ Completion:
 
 Doctor:
   shbx doctor                   Check config, SSH, keys, and tunnels
+  shbx doctor --fix             Apply safe automatic repairs
 
 Import:
   shbx import ssh-config         Import hosts from ~/.ssh/config
@@ -2073,7 +2074,7 @@ func buildTunnelStartSSHArgs(name string, host config.Host, tunnel config.Tunnel
 	}
 	args := buildSSHArgs(host)
 	forwardFlag, spec := tunnelForwardSpec(tunnel)
-	args = append(args[:len(args)-1], "-M", "-S", controlPath, "-f", "-N", "-T", forwardFlag, spec, args[len(args)-1])
+	args = append(args[:len(args)-1], "-o", "ExitOnForwardFailure=yes", "-M", "-S", controlPath, "-f", "-N", "-T", forwardFlag, spec, args[len(args)-1])
 	return args, nil
 }
 
@@ -2145,7 +2146,13 @@ func validatePort(label string, port int) error {
 	return nil
 }
 
-func startTunnelProcess(name string, host config.Host, tunnel config.Tunnel, allowPrompt bool) (int, error) {
+func startTunnelProcess(name string, host config.Host, tunnel config.Tunnel, allowPrompt bool) (pid int, err error) {
+	defer func() {
+		if err != nil {
+			cleanupFailedTunnelStartup(name, host)
+		}
+	}()
+
 	sshArgs, err := buildTunnelStartSSHArgs(name, host, tunnel)
 	if err != nil {
 		return 0, err
@@ -2160,7 +2167,7 @@ func startTunnelProcess(name string, host config.Host, tunnel config.Tunnel, all
 		}
 	}
 
-	pid, err := tunnelMasterPID(name, host)
+	pid, err = tunnelMasterPID(name, host)
 	if err != nil {
 		return 0, err
 	}
@@ -2172,6 +2179,13 @@ func startTunnelProcess(name string, host config.Host, tunnel config.Tunnel, all
 		return 0, err
 	}
 	return pid, nil
+}
+
+func cleanupFailedTunnelStartup(name string, host config.Host) {
+	if controlArgs, err := buildTunnelControlSSHArgs(name, host, "exit"); err == nil {
+		_ = runSSHAndWait(controlArgs, false)
+	}
+	_, _, _ = tunnelstate.Stop(name)
 }
 
 func stopTunnelByName(name string, host config.Host) (bool, tunnelstate.Entry, error) {
@@ -2195,16 +2209,28 @@ func stopTunnelByName(name string, host config.Host) (bool, tunnelstate.Entry, e
 
 func runSSHAndWait(sshArgs []string, allowPrompt bool) error {
 	cmd := exec.Command(sshBinary(), sshArgs...)
+	var stderr bytes.Buffer
 	if allowPrompt {
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
 	} else {
 		cmd.Stdin = nil
 		cmd.Stdout = nil
-		cmd.Stderr = nil
+		cmd.Stderr = &stderr
 	}
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return sshRunError(err, stderr.String())
+	}
+	return nil
+}
+
+func sshRunError(err error, output string) error {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, output)
 }
 
 func tunnelMasterPID(name string, host config.Host) (int, error) {
@@ -2533,7 +2559,7 @@ func runSSHWithPassword(password string, sshArgs []string) error {
 
 	outputErr := <-outputDone
 	if waitErr != nil {
-		return waitErr
+		return sshRunError(waitErr, "")
 	}
 	if outputErr != nil && !errors.Is(outputErr, os.ErrClosed) {
 		return outputErr
@@ -2548,9 +2574,10 @@ func runSSHWithStoredPassword(password string, sshArgs []string) error {
 		return err
 	}
 
+	var output bytes.Buffer
 	outputDone := make(chan error, 1)
 	go func() {
-		outputDone <- copySSHOutputAndInjectPassword(io.Discard, ptmx, password)
+		outputDone <- copySSHOutputAndInjectPassword(&output, ptmx, password)
 	}()
 
 	waitErr := cmd.Wait()
@@ -2558,7 +2585,7 @@ func runSSHWithStoredPassword(password string, sshArgs []string) error {
 
 	outputErr := <-outputDone
 	if waitErr != nil {
-		return waitErr
+		return sshRunError(waitErr, output.String())
 	}
 	if outputErr != nil && !errors.Is(outputErr, os.ErrClosed) {
 		return outputErr

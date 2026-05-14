@@ -414,7 +414,7 @@ func TestTunnelAddListShowStartDryRunAndRemove(t *testing.T) {
 	if err := app.Run([]string{"tunnel", "show", "db"}); err != nil {
 		t.Fatalf("tunnel show: %v", err)
 	}
-	for _, want := range []string{"Command: ssh -p 2222 -i '/tmp/key with space'", "-M -S", "-f -N -T -L 5432:127.0.0.1:5432 deploy@prod.example"} {
+	for _, want := range []string{"Command: ssh -p 2222 -i '/tmp/key with space'", "-o ExitOnForwardFailure=yes", "-M -S", "-f -N -T -L 5432:127.0.0.1:5432 deploy@prod.example"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("tunnel show missing %q in %q", want, out.String())
 		}
@@ -424,7 +424,7 @@ func TestTunnelAddListShowStartDryRunAndRemove(t *testing.T) {
 	if err := app.Run([]string{"tunnel", "start", "db", "--dry-run"}); err != nil {
 		t.Fatalf("tunnel start --dry-run: %v", err)
 	}
-	for _, want := range []string{"ssh -p 2222 -i '/tmp/key with space'", "-M -S", "-f -N -T -L 5432:127.0.0.1:5432 deploy@prod.example\n"} {
+	for _, want := range []string{"ssh -p 2222 -i '/tmp/key with space'", "-o ExitOnForwardFailure=yes", "-M -S", "-f -N -T -L 5432:127.0.0.1:5432 deploy@prod.example\n"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("tunnel dry-run output missing %q in %q", want, out.String())
 		}
@@ -451,7 +451,7 @@ func TestTunnelDynamicDryRun(t *testing.T) {
 	if err := app.Run([]string{"tunnel", "start", "socks", "--print"}); err != nil {
 		t.Fatalf("tunnel dynamic print: %v", err)
 	}
-	for _, want := range []string{"ssh -p 22", "-M -S", "-f -N -T -D 127.0.0.1:1080 deploy@prod.example\n"} {
+	for _, want := range []string{"ssh -p 22", "-o ExitOnForwardFailure=yes", "-M -S", "-f -N -T -D 127.0.0.1:1080 deploy@prod.example\n"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("dynamic tunnel output missing %q in %q", want, out.String())
 		}
@@ -497,6 +497,30 @@ func TestTunnelStartRunsInBackgroundAndStopTerminatesIt(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Stopped tunnel \"db\" with pid") {
 		t.Fatalf("unexpected stop output %q", out.String())
+	}
+}
+
+func TestTunnelStartReportsForwardSetupFailureWithoutState(t *testing.T) {
+	withTempHome(t)
+	t.Setenv("SHBX_SSH_BIN", fakeSSHFailureBinary(t, "bind [127.0.0.1]:5432: Address already in use"))
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy"})
+	addTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	err := app.Run([]string{"tunnel", "start", "db"})
+	if err == nil {
+		t.Fatal("expected tunnel start failure")
+	}
+	for _, want := range []string{"start tunnel \"db\"", "Address already in use"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("start error missing %q in %q", want, err.Error())
+		}
+	}
+	if _, running, err := tunnelstate.Get("db"); err != nil {
+		t.Fatalf("get tunnel state: %v", err)
+	} else if running {
+		t.Fatal("failed tunnel startup left a running state entry")
 	}
 }
 
@@ -1093,6 +1117,17 @@ func fakeSSHExitBinary(t *testing.T, code int) string {
 
 	path := filepath.Join(t.TempDir(), "fake-ssh")
 	script := fmt.Sprintf("#!/bin/sh\nexit %d\n", code)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ssh: %v", err)
+	}
+	return path
+}
+
+func fakeSSHFailureBinary(t *testing.T, message string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "fake-ssh")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %s >&2\nexit 255\n", shellQuote(message))
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ssh: %v", err)
 	}

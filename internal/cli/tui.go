@@ -2282,11 +2282,7 @@ func tunnelRow(item tuiTunnelItem, width int, targetStyle lipgloss.Style) string
 		return ""
 	}
 	name := item.name
-	status := "stopped"
-	if _, running, _ := tunnelstate.Get(item.name); running {
-		status = "running"
-	}
-	target := status + "  " + formatTunnelForward(item.tunnel)
+	target := tunnelStatusLabel(item.name) + "  " + formatTunnelForward(item.tunnel)
 	full := name + "  " + targetStyle.Render(target)
 	if lipgloss.Width(name)+2+lipgloss.Width(target) <= width {
 		return full
@@ -2300,6 +2296,13 @@ func tunnelRow(item tuiTunnelItem, width int, targetStyle lipgloss.Style) string
 		}
 	}
 	return truncate(name+"  "+target, width)
+}
+
+func tunnelStatusLabel(name string) string {
+	if _, running, _ := tunnelstate.Get(name); running {
+		return tunnelRunningStatusStyle.Render("● running")
+	}
+	return tunnelStoppedStatusStyle.Render("○ stopped")
 }
 
 func fitRow(value string, width int) string {
@@ -2574,4 +2577,8 @@ var (
 			Foreground(lipgloss.Color("71"))
 	statusStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("40"))
+	tunnelRunningStatusStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("40"))
+	tunnelStoppedStatusStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("241"))
 )

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -27,11 +28,37 @@ type doctorCheck struct {
 }
 
 func (a App) runDoctor(args []string) error {
-	if len(args) != 0 {
-		return errors.New("usage: shbx doctor")
+	fix := false
+	switch len(args) {
+	case 0:
+	case 1:
+		if args[0] != "--fix" {
+			return errors.New("usage: shbx doctor [--fix]")
+		}
+		fix = true
+	default:
+		return errors.New("usage: shbx doctor [--fix]")
 	}
 
+	if fix {
+		return a.runDoctorFix()
+	}
 	fmt.Fprint(a.out, buildDoctorReport())
+	return nil
+}
+
+func (a App) runDoctorFix() error {
+	fixes, err := applyDoctorFixes()
+	if err != nil {
+		return err
+	}
+	if len(fixes) == 0 {
+		fmt.Fprintln(a.out, "No fixes applied")
+		return nil
+	}
+	for _, fix := range fixes {
+		fmt.Fprintf(a.out, "Fixed: %s\n", fix)
+	}
 	return nil
 }
 
@@ -214,18 +241,156 @@ func passwordDoctorChecks(hosts map[string]config.Host) []doctorCheck {
 }
 
 func tunnelStateDoctorChecks() []doctorCheck {
-	state, err := tunnelstate.Prune()
+	state, err := tunnelstate.Load()
 	if err != nil {
 		return []doctorCheck{{level: doctorFail, text: "check tunnel state: " + err.Error()}}
 	}
 	running := 0
+	stale := 0
 	for _, entry := range state.Tunnels {
-		if tunnelstate.IsRunning(entry.PID) {
+		if tunnelstate.EntryRunning(entry) {
 			running++
+		} else {
+			stale++
 		}
 	}
-	if running == 0 {
-		return []doctorCheck{{level: doctorOK, text: "running tunnels: 0"}}
+	checks := []doctorCheck{{level: doctorOK, text: fmt.Sprintf("running tunnels: %d", running)}}
+	if stale > 0 {
+		checks = append(checks, doctorCheck{level: doctorWarn, text: fmt.Sprintf("stale tunnel state: %d; run shbx doctor --fix", stale)})
 	}
-	return []doctorCheck{{level: doctorOK, text: fmt.Sprintf("running tunnels: %d", running)}}
+	return checks
+}
+
+func applyDoctorFixes() ([]string, error) {
+	var fixes []string
+
+	path, err := config.Path()
+	if err != nil {
+		return nil, fmt.Errorf("resolve config path: %w", err)
+	}
+
+	exists, err := config.Exists()
+	if err != nil {
+		return nil, fmt.Errorf("check config file: %w", err)
+	}
+	if !exists {
+		createdPath, created, err := config.Init()
+		if err != nil {
+			return nil, fmt.Errorf("create config: %w", err)
+		}
+		if created {
+			fixes = append(fixes, "created config: "+createdPath)
+		}
+	}
+
+	configModeFixed, err := fixConfigPermissions(path)
+	if err != nil {
+		return nil, err
+	}
+	if configModeFixed {
+		fixes = append(fixes, "config permissions: 0600")
+	}
+
+	dirFixes, err := fixTunnelStateDirs()
+	if err != nil {
+		return nil, err
+	}
+	fixes = append(fixes, dirFixes...)
+
+	pruned, err := pruneDoctorTunnelState()
+	if err != nil {
+		return nil, err
+	}
+	if pruned > 0 {
+		fixes = append(fixes, fmt.Sprintf("pruned stale tunnel state: %d", pruned))
+	}
+
+	return fixes, nil
+}
+
+func fixConfigPermissions(path string) (bool, error) {
+	if runtime.GOOS == "windows" {
+		return false, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, fmt.Errorf("stat config file: %w", err)
+	}
+	if info.IsDir() {
+		return false, errors.New("config path is a directory")
+	}
+	if info.Mode().Perm() == 0o600 {
+		return false, nil
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return false, fmt.Errorf("chmod config file: %w", err)
+	}
+	return true, nil
+}
+
+func fixTunnelStateDirs() ([]string, error) {
+	var fixes []string
+
+	statePath, err := tunnelstate.Path()
+	if err != nil {
+		return nil, fmt.Errorf("resolve tunnel state path: %w", err)
+	}
+	created, err := ensureDoctorDir(filepath.Dir(statePath), "tunnel state dir")
+	if err != nil {
+		return nil, err
+	}
+	if created != "" {
+		fixes = append(fixes, created)
+	}
+
+	controlPath, err := tunnelstate.ControlPath("doctor")
+	if err != nil {
+		return nil, fmt.Errorf("resolve tunnel control path: %w", err)
+	}
+	created, err = ensureDoctorDir(filepath.Dir(controlPath), "tunnel control dir")
+	if err != nil {
+		return nil, err
+	}
+	if created != "" {
+		fixes = append(fixes, created)
+	}
+	return fixes, nil
+}
+
+func ensureDoctorDir(path, label string) (string, error) {
+	info, err := os.Stat(path)
+	if err == nil {
+		if !info.IsDir() {
+			return "", fmt.Errorf("%s path is not a directory: %s", label, path)
+		}
+		return "", nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("stat %s: %w", label, err)
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return "", fmt.Errorf("create %s: %w", label, err)
+	}
+	return fmt.Sprintf("created %s: %s", label, path), nil
+}
+
+func pruneDoctorTunnelState() (int, error) {
+	state, err := tunnelstate.Load()
+	if err != nil {
+		return 0, fmt.Errorf("load tunnel state: %w", err)
+	}
+	pruned := 0
+	for name, entry := range state.Tunnels {
+		if !tunnelstate.EntryRunning(entry) {
+			delete(state.Tunnels, name)
+			pruned++
+		}
+	}
+	if pruned == 0 {
+		return 0, nil
+	}
+	if err := tunnelstate.Save(state); err != nil {
+		return 0, fmt.Errorf("save tunnel state: %w", err)
+	}
+	return pruned, nil
 }

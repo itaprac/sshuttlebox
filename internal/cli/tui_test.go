@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/itaprac/sshuttlebox/internal/config"
+	"github.com/itaprac/sshuttlebox/internal/tunnelstate"
 )
 
 func TestTUIModelLoadsHostsSorted(t *testing.T) {
@@ -551,6 +553,42 @@ func TestTUIListsGroupHostsAndTunnels(t *testing.T) {
 	tunnels := model.tunnelsPaneView(60, true)
 	if !strings.Contains(tunnels, "work") || !strings.Contains(tunnels, "ungrouped") {
 		t.Fatalf("tunnels pane missing group sections: %q", tunnels)
+	}
+}
+
+func TestTUITunnelRowsShowStatusSymbols(t *testing.T) {
+	withTempHome(t)
+	if err := tunnelstate.Save(tunnelstate.State{Tunnels: map[string]tunnelstate.Entry{
+		"db": tunnelstate.NewEntry(os.Getpid(), "ssh -N prod", ""),
+	}}); err != nil {
+		t.Fatalf("save tunnel state: %v", err)
+	}
+
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"prod": {Host: "prod.example"},
+		},
+		Tunnels: map[string]config.Tunnel{
+			"db":    {Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432},
+			"socks": {Host: "prod", Type: "dynamic", LocalPort: 1080},
+		},
+	}, nil)
+
+	focused := model.tunnelsPaneView(72, true)
+	if !strings.Contains(focused, "● running") {
+		t.Fatalf("focused tunnels pane missing running status symbol/text: %q", focused)
+	}
+	if !strings.Contains(focused, "○ stopped") {
+		t.Fatalf("focused tunnels pane missing stopped status symbol/text: %q", focused)
+	}
+
+	unfocused := model.tunnelsPaneView(72, false)
+	if !strings.Contains(unfocused, "● running") {
+		t.Fatalf("unfocused tunnels pane missing running status symbol/text: %q", unfocused)
+	}
+	if !strings.Contains(unfocused, "○ stopped") {
+		t.Fatalf("unfocused tunnels pane missing stopped status symbol/text: %q", unfocused)
 	}
 }
 
