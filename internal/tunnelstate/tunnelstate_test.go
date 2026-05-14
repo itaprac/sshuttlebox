@@ -109,6 +109,122 @@ func TestGetPrunesDeadPID(t *testing.T) {
 	}
 }
 
+func TestGetPrunesFailedControlSocketCheckEvenWhenPIDIsAlive(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake SSH script uses sh")
+	}
+	useTempStateHome(t)
+	sshPath, _ := fakeSSH(t, 1)
+	t.Setenv("SHBX_SSH_BIN", sshPath)
+
+	controlPath := filepath.Join(t.TempDir(), "missing.sock")
+	t.Setenv("SHBX_EXPECT_CONTROL", controlPath)
+	t.Setenv("SHBX_EXPECT_TARGET", "user@example.com")
+
+	if err := Save(State{Tunnels: map[string]Entry{
+		"stale": {
+			PID:         os.Getpid(),
+			Command:     "ssh -p 22 -M -S " + controlPath + " -f -N -T -L 15432:localhost:5432 user@example.com",
+			ControlPath: controlPath,
+		},
+	}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	if _, ok, err := Get("stale"); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	} else if ok {
+		t.Fatal("Get() ok = true, want false for failed control check")
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if _, ok := got.Tunnels["stale"]; ok {
+		t.Fatalf("Get() did not prune stale tunnel, state = %+v", got.Tunnels)
+	}
+}
+
+func TestGetUsesControlSocketCheck(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake SSH script uses sh")
+	}
+	useTempStateHome(t)
+	sshPath, argsPath := fakeSSH(t, 0)
+	t.Setenv("SHBX_SSH_BIN", sshPath)
+
+	controlPath := filepath.Join(t.TempDir(), "db.sock")
+	if err := os.WriteFile(controlPath, []byte("socket placeholder"), 0o600); err != nil {
+		t.Fatalf("write control socket placeholder: %v", err)
+	}
+	t.Setenv("SHBX_EXPECT_CONTROL", controlPath)
+	t.Setenv("SHBX_EXPECT_TARGET", "user@example.com")
+
+	entry := Entry{
+		PID:         os.Getpid(),
+		Command:     "ssh -p 22 -M -S " + controlPath + " -f -N -T -L 15432:localhost:5432 user@example.com # password: set",
+		ControlPath: controlPath,
+	}
+	if err := Save(State{Tunnels: map[string]Entry{"db": entry}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	gotEntry, ok, err := Get("db")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("Get() ok = false, want true after successful control check")
+	}
+	if gotEntry.ControlPath != controlPath {
+		t.Fatalf("Get() entry = %+v, want control path %q", gotEntry, controlPath)
+	}
+
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read fake ssh args: %v", err)
+	}
+	wantArgs := "-S\n" + controlPath + "\n-O\ncheck\nuser@example.com\n"
+	if string(args) != wantArgs {
+		t.Fatalf("ssh args = %q, want %q", string(args), wantArgs)
+	}
+}
+
+func TestPruneRemovesFailedControlSocketCheckEvenWhenPIDIsAlive(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake SSH script uses sh")
+	}
+	useTempStateHome(t)
+	sshPath, _ := fakeSSH(t, 1)
+	t.Setenv("SHBX_SSH_BIN", sshPath)
+
+	controlPath := filepath.Join(t.TempDir(), "db.sock")
+	if err := os.WriteFile(controlPath, []byte("socket placeholder"), 0o600); err != nil {
+		t.Fatalf("write control socket placeholder: %v", err)
+	}
+	t.Setenv("SHBX_EXPECT_CONTROL", controlPath)
+	t.Setenv("SHBX_EXPECT_TARGET", "user@example.com")
+
+	if err := Save(State{Tunnels: map[string]Entry{
+		"stale": {
+			PID:         os.Getpid(),
+			Command:     "ssh -p 22 -M -S " + controlPath + " -f -N -T -L 15432:localhost:5432 user@example.com",
+			ControlPath: controlPath,
+		},
+	}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	got, err := Prune()
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if _, ok := got.Tunnels["stale"]; ok {
+		t.Fatalf("Prune() kept tunnel after failed control check, state = %+v", got.Tunnels)
+	}
+}
+
 func TestPruneRemovesDeadPIDAndKeepsRunningPID(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("IsRunning is unsupported on windows")
@@ -136,6 +252,27 @@ func TestPruneRemovesDeadPIDAndKeepsRunningPID(t *testing.T) {
 	} else if gotEntry.PID != running.PID || gotEntry.Command != running.Command {
 		t.Fatalf("Prune()[live] = %+v, want %+v", gotEntry, running)
 	}
+}
+
+func fakeSSH(t *testing.T, exitCode int) (string, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "args")
+	sshPath := filepath.Join(dir, "ssh")
+	script := `#!/bin/sh
+printf '%s\n' "$@" > "$SHBX_SSH_ARGS_FILE"
+if [ "$1" = "-S" ] && [ "$2" = "$SHBX_EXPECT_CONTROL" ] && [ "$3" = "-O" ] && [ "$4" = "check" ] && [ "$5" = "$SHBX_EXPECT_TARGET" ]; then
+	exit "$SHBX_SSH_EXIT"
+fi
+exit 64
+`
+	if err := os.WriteFile(sshPath, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake ssh: %v", err)
+	}
+	t.Setenv("SHBX_SSH_ARGS_FILE", argsPath)
+	t.Setenv("SHBX_SSH_EXIT", string(rune('0'+exitCode)))
+	return sshPath, argsPath
 }
 
 func TestControlPathSanitizesNameAndUsesStableHash(t *testing.T) {

@@ -6,10 +6,56 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/itaprac/sshuttlebox/internal/config"
+	"github.com/itaprac/sshuttlebox/internal/tunnelstate"
 )
+
+func (a App) runConfigStatus(args []string) error {
+	if len(args) != 0 {
+		return errors.New("usage: shbx config status")
+	}
+
+	path, err := config.Path()
+	if err != nil {
+		return err
+	}
+	exists, err := config.Exists()
+	if err != nil {
+		return err
+	}
+	if !exists {
+		fmt.Fprintf(a.out, "Config: %s (missing)\n", path)
+		return nil
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	running, stale, err := tunnelStateCounts()
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(a.out, "Config: %s (present)\n", path)
+	fmt.Fprintf(a.out, "Hosts: %d  Tunnels: %d  Groups: %d  Running: %d\n", len(cfg.Hosts), len(cfg.Tunnels), len(cfg.Groups), running)
+	if stale > 0 {
+		fmt.Fprintf(a.out, "Warn: stale tunnel state: %d\n", stale)
+	}
+	if passwords := configPasswordCount(cfg); passwords > 0 {
+		fmt.Fprintf(a.out, "Warn: saved passwords: %d\n", passwords)
+	}
+	if warning, err := configPermissionWarning(path); err != nil {
+		return err
+	} else if warning != "" {
+		fmt.Fprintln(a.out, warning)
+	}
+	return nil
+}
 
 func (a App) runConfigExport(args []string) error {
 	fs := flag.NewFlagSet("config export", flag.ContinueOnError)
@@ -103,10 +149,46 @@ func parseConfigRestoreArgs(args []string) (string, bool, error) {
 }
 
 func configHasPasswords(cfg config.Config) bool {
+	return configPasswordCount(cfg) > 0
+}
+
+func configPasswordCount(cfg config.Config) int {
+	count := 0
 	for _, host := range cfg.Hosts {
 		if host.Password != "" {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
+}
+
+func tunnelStateCounts() (int, int, error) {
+	state, err := tunnelstate.Load()
+	if err != nil {
+		return 0, 0, fmt.Errorf("check tunnel state: %w", err)
+	}
+	running := 0
+	stale := 0
+	for _, entry := range state.Tunnels {
+		if tunnelstate.EntryRunning(entry) {
+			running++
+		} else {
+			stale++
+		}
+	}
+	return running, stale, nil
+}
+
+func configPermissionWarning(path string) (string, error) {
+	if runtime.GOOS == "windows" {
+		return "", nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("stat config file: %w", err)
+	}
+	if info.Mode().Perm()&0o077 == 0 {
+		return "", nil
+	}
+	return fmt.Sprintf("Warn: config permissions: %04o (prefer 0600)", info.Mode().Perm()), nil
 }

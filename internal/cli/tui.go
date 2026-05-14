@@ -127,6 +127,7 @@ type tuiModel struct {
 	groupField    int
 	palette       []tuiPaletteItem
 	paletteCursor int
+	paletteQuery  string
 	help          help.Model
 	keys          tuiKeyMap
 }
@@ -740,30 +741,43 @@ func (m tuiModel) updatePreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) updatePalette(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
-	case key.Matches(msg, m.keys.Quit):
+	case msg.Type == tea.KeyCtrlC:
 		return m, tea.Quit
-	case key.Matches(msg, m.keys.Cancel), key.Matches(msg, m.keys.Palette):
+	case key.Matches(msg, m.keys.Cancel):
 		m.screen = tuiScreenMain
 		m.palette = nil
+		m.paletteQuery = ""
 		m.status = "Cancelled."
 		m.err = nil
 		return m, nil
-	case key.Matches(msg, m.keys.Up):
+	case msg.Type == tea.KeyUp:
 		if m.paletteCursor > 0 {
 			m.paletteCursor--
 		}
-	case key.Matches(msg, m.keys.Down):
-		if m.paletteCursor < len(m.palette)-1 {
+	case msg.Type == tea.KeyDown:
+		if m.paletteCursor < len(m.filteredPaletteItems())-1 {
 			m.paletteCursor++
 		}
-	case key.Matches(msg, m.keys.Connect), msg.String() == "enter":
-		if len(m.palette) == 0 || m.paletteCursor < 0 || m.paletteCursor >= len(m.palette) {
-			m.screen = tuiScreenMain
+	case msg.Type == tea.KeyEnter:
+		items := m.filteredPaletteItems()
+		if len(items) == 0 || m.paletteCursor < 0 || m.paletteCursor >= len(items) {
 			m.setError(errors.New("no command selected"))
 			return m, nil
 		}
-		return m.runPaletteAction(m.palette[m.paletteCursor].action)
+		return m.runPaletteAction(items[m.paletteCursor].action)
+	case msg.Type == tea.KeyBackspace || msg.Type == tea.KeyCtrlH:
+		if m.paletteQuery != "" {
+			runes := []rune(m.paletteQuery)
+			m.paletteQuery = string(runes[:len(runes)-1])
+			m.paletteCursor = 0
+			m.err = nil
+		}
+	case msg.Type == tea.KeyRunes:
+		m.paletteQuery += string(msg.Runes)
+		m.paletteCursor = 0
+		m.err = nil
 	}
+	m.ensurePaletteCursor()
 	return m, nil
 }
 
@@ -1379,10 +1393,15 @@ func (m tuiModel) paletteView() string {
 	}
 
 	lines := []string{titleStyle.Render("Command palette"), ""}
-	if len(m.palette) == 0 {
-		lines = append(lines, mutedStyle.Render("No actions available."))
+	if m.paletteQuery != "" {
+		lines = append(lines, mutedStyle.Render("> "+m.paletteQuery), "")
+	}
+
+	items := m.filteredPaletteItems()
+	if len(items) == 0 {
+		lines = append(lines, mutedStyle.Render("No matching actions."))
 	} else {
-		for i, item := range m.palette {
+		for i, item := range items {
 			if i == m.paletteCursor {
 				line := paletteItemLabel(item, width-2, selectedTargetStyle)
 				lines = append(lines, selectedStyle.Render(fitRow("> "+line, width)))
@@ -1507,6 +1526,20 @@ func (m *tuiModel) ensureTunnelCursor() {
 	}
 }
 
+func (m *tuiModel) ensurePaletteCursor() {
+	items := m.filteredPaletteItems()
+	if len(items) == 0 {
+		m.paletteCursor = 0
+		return
+	}
+	if m.paletteCursor < 0 {
+		m.paletteCursor = 0
+	}
+	if m.paletteCursor >= len(items) {
+		m.paletteCursor = len(items) - 1
+	}
+}
+
 func (m tuiModel) filteredItems() []tuiHostItem {
 	query := strings.ToLower(strings.TrimSpace(m.filter.Value()))
 	matches := func(name string, host config.Host) bool {
@@ -1575,6 +1608,44 @@ func (m tuiModel) filteredTunnelItems() []tuiTunnelItem {
 		return items[i].name < items[j].name
 	})
 	return items
+}
+
+func (m tuiModel) filteredPaletteItems() []tuiPaletteItem {
+	query := strings.TrimSpace(m.paletteQuery)
+	if query == "" {
+		return append([]tuiPaletteItem(nil), m.palette...)
+	}
+
+	items := make([]tuiPaletteItem, 0, len(m.palette))
+	for _, item := range m.palette {
+		if fuzzyPaletteMatch(query, item) {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func fuzzyPaletteMatch(query string, item tuiPaletteItem) bool {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return true
+	}
+	haystack := strings.ToLower(strings.TrimSpace(item.title + " " + item.hint))
+	if strings.Contains(haystack, query) {
+		return true
+	}
+
+	next := 0
+	queryRunes := []rune(query)
+	for _, r := range haystack {
+		if r == queryRunes[next] {
+			next++
+			if next == len(queryRunes) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (m tuiModel) selectedItem() (tuiHostItem, bool) {
@@ -1683,6 +1754,7 @@ func (m tuiModel) runSelectedPreview() (tea.Model, tea.Cmd) {
 func (m tuiModel) openPalette() (tea.Model, tea.Cmd) {
 	m.palette = m.paletteItems()
 	m.paletteCursor = 0
+	m.paletteQuery = ""
 	m.screen = tuiScreenPalette
 	m.status = ""
 	m.err = nil

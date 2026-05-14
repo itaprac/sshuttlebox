@@ -7,10 +7,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/itaprac/sshuttlebox/internal/config"
+	"github.com/itaprac/sshuttlebox/internal/tunnelstate"
 )
 
 func TestConfigCommands(t *testing.T) {
@@ -40,6 +42,61 @@ func TestConfigCommands(t *testing.T) {
 	}
 	if !strings.HasSuffix(strings.TrimSpace(out.String()), filepath.Join(".config", config.AppDirName, config.ConfigFileName)) {
 		t.Fatalf("unexpected config path %q", out.String())
+	}
+}
+
+func TestConfigStatusSummarizesHealth(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy", Password: "secret"})
+	addTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+
+	path, err := config.Path()
+	if err != nil {
+		t.Fatalf("config path: %v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.Groups["ops"] = config.Group{Name: "ops"}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatalf("chmod config: %v", err)
+		}
+	}
+	if err := tunnelstate.Save(tunnelstate.State{Tunnels: map[string]tunnelstate.Entry{
+		"db":    tunnelstate.NewEntry(os.Getpid(), "ssh -N prod", ""),
+		"stale": tunnelstate.NewEntry(-1, "ssh -N old", ""),
+	}}); err != nil {
+		t.Fatalf("save tunnel state: %v", err)
+	}
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"config", "status"}); err != nil {
+		t.Fatalf("config status: %v", err)
+	}
+
+	got := out.String()
+	want := []string{
+		"Config: " + path + " (present)",
+		"Hosts: 1  Tunnels: 1  Groups: 1  Running: 1",
+		"Warn: stale tunnel state: 1",
+		"Warn: saved passwords: 1",
+	}
+	if runtime.GOOS != "windows" {
+		want = append(want, "Warn: config permissions: 0644 (prefer 0600)")
+	}
+	for _, text := range want {
+		if !strings.Contains(got, text) {
+			t.Fatalf("config status missing %q in %q", text, got)
+		}
+	}
+	if strings.Contains(got, "secret") {
+		t.Fatalf("config status leaked password: %q", got)
 	}
 }
 

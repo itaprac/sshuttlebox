@@ -796,6 +796,127 @@ func TestTUICommandPaletteRunsActions(t *testing.T) {
 	}
 }
 
+func TestTUICommandPaletteFiltersTypedQuery(t *testing.T) {
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"prod": {Host: "prod.example"},
+		},
+	}, nil)
+
+	updated, _ := model.openPalette()
+	model = updated.(tuiModel)
+	updated, _ = model.updatePalette(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("psc")})
+	model = updated.(tuiModel)
+
+	items := model.filteredPaletteItems()
+	if len(items) != 1 || items[0].title != "Print SSH command" {
+		t.Fatalf("filtered items = %#v, want Print SSH command", items)
+	}
+	if model.paletteCursor != 0 {
+		t.Fatalf("paletteCursor = %d, want 0", model.paletteCursor)
+	}
+	view := model.paletteView()
+	if !strings.Contains(view, "> psc") || strings.Contains(view, "Run doctor") {
+		t.Fatalf("palette view did not show filtered query/results: %q", view)
+	}
+}
+
+func TestTUICommandPaletteFiltersHintAndAllowsRegularRunes(t *testing.T) {
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"qa": {Host: "qa.example"},
+		},
+	}, nil)
+
+	updated, _ := model.openPalette()
+	model = updated.(tuiModel)
+	updated, _ = model.updatePalette(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("qa")})
+	model = updated.(tuiModel)
+
+	items := model.filteredPaletteItems()
+	if len(items) != 4 {
+		t.Fatalf("filtered items = %#v, want selected-host actions by hint", items)
+	}
+	for _, item := range items {
+		if item.hint != "qa" {
+			t.Fatalf("filtered item hint = %q, want qa in %#v", item.hint, items)
+		}
+	}
+}
+
+func TestTUICommandPaletteCursorResetAndClamp(t *testing.T) {
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"prod": {Host: "prod.example"},
+		},
+	}, nil)
+
+	updated, _ := model.openPalette()
+	model = updated.(tuiModel)
+	updated, _ = model.updatePalette(keyMsg(tea.KeyDown))
+	model = updated.(tuiModel)
+	if model.paletteCursor != 1 {
+		t.Fatalf("paletteCursor = %d, want 1 after down", model.paletteCursor)
+	}
+
+	updated, _ = model.updatePalette(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("doc")})
+	model = updated.(tuiModel)
+	if model.paletteCursor != 0 {
+		t.Fatalf("paletteCursor = %d, want reset to 0 after typing", model.paletteCursor)
+	}
+	if got := model.filteredPaletteItems(); len(got) != 1 || got[0].title != "Run doctor" {
+		t.Fatalf("filtered items = %#v, want Run doctor", got)
+	}
+
+	model.paletteCursor = 99
+	model.ensurePaletteCursor()
+	if model.paletteCursor != 0 {
+		t.Fatalf("paletteCursor = %d, want clamped to 0", model.paletteCursor)
+	}
+}
+
+func TestTUICommandPaletteNoResultBehavior(t *testing.T) {
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"prod": {Host: "prod.example"},
+		},
+	}, nil)
+
+	updated, _ := model.openPalette()
+	model = updated.(tuiModel)
+	updated, _ = model.updatePalette(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("zzzz")})
+	model = updated.(tuiModel)
+
+	if got := model.filteredPaletteItems(); len(got) != 0 {
+		t.Fatalf("filtered items = %#v, want none", got)
+	}
+	if model.paletteCursor != 0 {
+		t.Fatalf("paletteCursor = %d, want 0 with no results", model.paletteCursor)
+	}
+	if view := model.paletteView(); !strings.Contains(view, "No matching actions.") {
+		t.Fatalf("palette view missing no-results copy: %q", view)
+	}
+
+	updated, _ = model.updatePalette(keyMsg(tea.KeyEnter))
+	model = updated.(tuiModel)
+	if model.screen != tuiScreenPalette {
+		t.Fatalf("screen = %v, want palette to stay open", model.screen)
+	}
+	if model.err == nil || !strings.Contains(model.err.Error(), "no command selected") {
+		t.Fatalf("err = %v, want no command selected", model.err)
+	}
+
+	updated, _ = model.updatePalette(keyMsg(tea.KeyBackspace))
+	model = updated.(tuiModel)
+	if model.paletteQuery != "zzz" {
+		t.Fatalf("paletteQuery = %q, want zzz after backspace", model.paletteQuery)
+	}
+}
+
 func TestUIHelpAndCompletionMentionCommand(t *testing.T) {
 	var out strings.Builder
 	app := App{in: strings.NewReader(""), out: &out}

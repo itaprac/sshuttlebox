@@ -1403,20 +1403,7 @@ func (a App) runConfig(args []string) error {
 		fmt.Fprintln(a.out, path)
 		return nil
 	case "status":
-		path, err := config.Path()
-		if err != nil {
-			return err
-		}
-		exists, err := config.Exists()
-		if err != nil {
-			return err
-		}
-		status := "missing"
-		if exists {
-			status = "present"
-		}
-		fmt.Fprintf(a.out, "Config: %s %s\n", path, status)
-		return nil
+		return a.runConfigStatus(args[1:])
 	case "export":
 		return a.runConfigExport(args[1:])
 	case "backup":
@@ -1542,7 +1529,7 @@ Commands:
   import           Import hosts from other tools
   config init      Create config file if it does not exist
   config path      Print config file path
-  config status    Show config file status
+  config status    Show config health summary
   config export    Export config JSON
   config backup    Back up config JSON
   config restore   Restore config JSON

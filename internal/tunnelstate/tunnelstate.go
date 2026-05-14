@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -94,7 +95,7 @@ func Get(name string) (Entry, bool, error) {
 		return Entry{}, false, err
 	}
 	entry, ok := state.Tunnels[name]
-	if !ok || !IsRunning(entry.PID) {
+	if !ok || !EntryRunning(entry) {
 		if ok {
 			delete(state.Tunnels, name)
 			_ = Save(state)
@@ -126,7 +127,7 @@ func Stop(name string) (Entry, bool, error) {
 	if err := Save(state); err != nil {
 		return Entry{}, false, err
 	}
-	if IsRunning(entry.PID) {
+	if EntryRunning(entry) {
 		_ = signalProcess(entry.PID, syscall.SIGTERM)
 	}
 	return entry, true, nil
@@ -139,7 +140,7 @@ func Prune() (State, error) {
 	}
 	changed := false
 	for name, entry := range state.Tunnels {
-		if !IsRunning(entry.PID) {
+		if !EntryRunning(entry) {
 			delete(state.Tunnels, name)
 			changed = true
 		}
@@ -150,6 +151,13 @@ func Prune() (State, error) {
 		}
 	}
 	return state, nil
+}
+
+func EntryRunning(entry Entry) bool {
+	if strings.TrimSpace(entry.ControlPath) == "" {
+		return IsRunning(entry.PID)
+	}
+	return controlSocketRunning(entry)
 }
 
 func IsRunning(pid int) bool {
@@ -195,6 +203,84 @@ func stateDir() (string, error) {
 		base = filepath.Join(home, ".local", "state")
 	}
 	return filepath.Join(base, appDirName), nil
+}
+
+func controlSocketRunning(entry Entry) bool {
+	controlPath := strings.TrimSpace(entry.ControlPath)
+	target, ok := sshTargetFromCommand(entry.Command)
+	if !ok {
+		return false
+	}
+	cmd := exec.Command(sshBinary(), "-S", controlPath, "-O", "check", target)
+	return cmd.Run() == nil
+}
+
+func sshTargetFromCommand(command string) (string, bool) {
+	fields := shellFields(command)
+	if len(fields) < 2 || fields[0] != "ssh" {
+		return "", false
+	}
+	return fields[len(fields)-1], true
+}
+
+func shellFields(command string) []string {
+	var fields []string
+	var b strings.Builder
+	inSingle := false
+	inDouble := false
+	escaped := false
+	hadValue := false
+
+	flush := func() {
+		if hadValue {
+			fields = append(fields, b.String())
+			b.Reset()
+			hadValue = false
+		}
+	}
+
+	for _, r := range command {
+		if escaped {
+			b.WriteRune(r)
+			hadValue = true
+			escaped = false
+			continue
+		}
+		if r == '\\' && !inSingle {
+			escaped = true
+			continue
+		}
+		if r == '\'' && !inDouble {
+			inSingle = !inSingle
+			hadValue = true
+			continue
+		}
+		if r == '"' && !inSingle {
+			inDouble = !inDouble
+			hadValue = true
+			continue
+		}
+		if !inSingle && !inDouble {
+			if r == '#' && !hadValue {
+				break
+			}
+			if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+				flush()
+				continue
+			}
+		}
+		b.WriteRune(r)
+		hadValue = true
+	}
+	flush()
+	return fields
+}
+
+func sshBinary() string {
+	if value := strings.TrimSpace(os.Getenv("SHBX_SSH_BIN")); value != "" {
+		return value
+	}
+	return "ssh"
 }
 
 func sanitizeName(name string) string {
