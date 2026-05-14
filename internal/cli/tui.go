@@ -702,6 +702,12 @@ func (m tuiModel) updateRemove(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setError(errors.New("no host selected"))
 			return m, nil
 		}
+		dependentTunnels := dependentTunnelNames(m.cfg, item.name)
+		if len(dependentTunnels) > 0 {
+			m.screen = tuiScreenMain
+			m.setError(fmt.Errorf("host %q is used by tunnels: %s", item.name, strings.Join(dependentTunnels, ", ")))
+			return m, nil
+		}
 		delete(m.cfg.Hosts, item.name)
 		if err := config.Save(m.path, m.cfg); err != nil {
 			m.screen = tuiScreenMain
@@ -1407,6 +1413,12 @@ func (m tuiModel) removeView() string {
 		name = item.name
 	}
 	text := fmt.Sprintf("Remove host %q?\n\nPress y/enter to remove, n/esc to cancel.", name)
+	if ok {
+		dependentTunnels := dependentTunnelNames(m.cfg, item.name)
+		if len(dependentTunnels) > 0 {
+			text = fmt.Sprintf("Host %q is used by tunnels: %s.\n\nRemove or edit those tunnels first.", name, strings.Join(dependentTunnels, ", "))
+		}
+	}
 	return titleStyle.Render("Confirm remove") + "\n\n" + text
 }
 
@@ -1961,6 +1973,7 @@ func (m *tuiModel) saveForm() error {
 			return fmt.Errorf("host %q already exists", name)
 		}
 		delete(m.cfg.Hosts, m.editOld)
+		renameTunnelHostReferences(&m.cfg, m.editOld, name)
 	}
 
 	m.cfg.Hosts[name] = host

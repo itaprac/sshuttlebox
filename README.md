@@ -211,7 +211,7 @@ Useful config commands:
 
 ```bash
 shbx config path     # print the config file path
-shbx config status   # show config health and counts
+shbx config status   # show whether the config file is present
 ```
 
 > **Note on credentials:** saved passwords are stored in the local config file.

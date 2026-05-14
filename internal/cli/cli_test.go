@@ -795,6 +795,22 @@ func TestEditRenamesAndUpdatesHost(t *testing.T) {
 	assertHost(t, "staging", config.Host{Host: "new.example", User: "deploy", Port: 2222})
 }
 
+func TestEditRenameUpdatesDependentTunnels(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{Host: "old.example", User: "deploy"})
+	addTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"edit", "prod", "--name", "staging"}); err != nil {
+		t.Fatalf("edit rename: %v", err)
+	}
+
+	assertHostMissing(t, "prod")
+	assertHost(t, "staging", config.Host{Host: "old.example", User: "deploy"})
+	assertTunnel(t, "db", config.Tunnel{Host: "staging", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+}
+
 func TestRemoveRequiresConfirmationAndSupportsSkipFlags(t *testing.T) {
 	withTempHome(t)
 	addHost(t, "prod", config.Host{Host: "example.com"})
@@ -822,6 +838,31 @@ func TestRemoveRequiresConfirmationAndSupportsSkipFlags(t *testing.T) {
 		t.Fatalf("remove --force: %v", err)
 	}
 	assertHostMissing(t, "dev")
+}
+
+func TestRemoveBlocksDependentTunnelsUnlessForced(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy"})
+	addTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	err := app.Run([]string{"remove", "prod", "--yes"})
+	if err == nil || !strings.Contains(err.Error(), "host \"prod\" is used by tunnels: db") {
+		t.Fatalf("expected dependent tunnel error, got %v", err)
+	}
+	assertHost(t, "prod", config.Host{Host: "prod.example", User: "deploy"})
+	assertTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+
+	out.Reset()
+	if err := app.Run([]string{"remove", "prod", "--force"}); err != nil {
+		t.Fatalf("remove --force: %v", err)
+	}
+	assertHostMissing(t, "prod")
+	assertTunnelMissing(t, "db")
+	if !strings.Contains(out.String(), "Removed host \"prod\" and dependent tunnels: db") {
+		t.Fatalf("unexpected force remove output %q", out.String())
+	}
 }
 
 func TestIdentityFileWarningDoesNotBlockSave(t *testing.T) {

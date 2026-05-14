@@ -1285,6 +1285,7 @@ func (a App) runEdit(args []string) error {
 
 	if newName != name {
 		delete(cfg.Hosts, name)
+		renameTunnelHostReferences(&cfg, name, newName)
 	}
 	cfg.Hosts[newName] = host
 	ensureGroup(&cfg, host.Group)
@@ -1338,6 +1339,10 @@ func (a App) runRemove(args []string) error {
 	if _, ok := cfg.Hosts[name]; !ok {
 		return fmt.Errorf("host %q not found", name)
 	}
+	dependentTunnels := dependentTunnelNames(cfg, name)
+	if len(dependentTunnels) > 0 && !*forceFlag {
+		return fmt.Errorf("host %q is used by tunnels: %s; remove or update them first, or pass --force to remove them too", name, strings.Join(dependentTunnels, ", "))
+	}
 
 	if !*yesFlag && !*forceFlag {
 		if !isTerminalInput(a.in) {
@@ -1355,12 +1360,20 @@ func (a App) runRemove(args []string) error {
 		}
 	}
 
+	for _, tunnelName := range dependentTunnels {
+		delete(cfg.Tunnels, tunnelName)
+		_, _, _ = tunnelstate.Stop(tunnelName)
+	}
 	delete(cfg.Hosts, name)
 
 	if err := config.Save(path, cfg); err != nil {
 		return err
 	}
 
+	if len(dependentTunnels) > 0 {
+		fmt.Fprintf(a.out, "Removed host %q and dependent tunnels: %s\n", name, strings.Join(dependentTunnels, ", "))
+		return nil
+	}
 	fmt.Fprintf(a.out, "Removed host %q\n", name)
 	return nil
 }
@@ -1594,7 +1607,7 @@ Groups:
 
 Remove options:
   --yes                        Remove without confirmation
-  --force                      Alias for --yes
+  --force                      Remove without confirmation; host remove also deletes dependent tunnels
 
 Completion:
   shbx completion zsh           Print zsh completion script
@@ -2385,6 +2398,26 @@ func renameGroupMembers(cfg *config.Config, oldName, newName string) {
 			cfg.Tunnels[name] = tunnel
 		}
 	}
+}
+
+func renameTunnelHostReferences(cfg *config.Config, oldName, newName string) {
+	for name, tunnel := range cfg.Tunnels {
+		if tunnel.Host == oldName {
+			tunnel.Host = newName
+			cfg.Tunnels[name] = tunnel
+		}
+	}
+}
+
+func dependentTunnelNames(cfg config.Config, hostName string) []string {
+	names := make([]string, 0)
+	for name, tunnel := range cfg.Tunnels {
+		if tunnel.Host == hostName {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func joinOrDefault(values []string, fallback string) string {

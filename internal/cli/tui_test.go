@@ -67,6 +67,59 @@ func TestTUIFormAddsEditsAndRemovesHost(t *testing.T) {
 	}
 }
 
+func TestTUIHostRenameUpdatesDependentTunnels(t *testing.T) {
+	withTempHome(t)
+	path, _, err := config.Init()
+	if err != nil {
+		t.Fatalf("init config: %v", err)
+	}
+	cfg := config.Default()
+	cfg.Hosts["prod"] = config.Host{Host: "prod.example", User: "deploy"}
+	cfg.Tunnels["db"] = config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	model := newTUIModelWithState(path, cfg, nil)
+	model = openTUIForm(t, model, "prod", model.cfg.Hosts["prod"])
+	setTUIFormValues(&model, "staging", "prod.example", "deploy", "", "", "")
+	if err := model.saveForm(); err != nil {
+		t.Fatalf("save edit form: %v", err)
+	}
+
+	assertHostMissing(t, "prod")
+	assertHost(t, "staging", config.Host{Host: "prod.example", User: "deploy"})
+	assertTunnel(t, "db", config.Tunnel{Host: "staging", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+}
+
+func TestTUIHostRemoveBlocksDependentTunnels(t *testing.T) {
+	withTempHome(t)
+	path, _, err := config.Init()
+	if err != nil {
+		t.Fatalf("init config: %v", err)
+	}
+	cfg := config.Default()
+	cfg.Hosts["prod"] = config.Host{Host: "prod.example", User: "deploy"}
+	cfg.Tunnels["db"] = config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	model := newTUIModelWithState(path, cfg, nil)
+	model.screen = tuiScreenRemove
+	if view := model.removeView(); !strings.Contains(view, "used by tunnels: db") {
+		t.Fatalf("remove view missing dependent tunnel warning: %q", view)
+	}
+	updated, _ := model.updateRemove(keyMsg(tea.KeyEnter))
+	model = updated.(tuiModel)
+
+	if model.err == nil || !strings.Contains(model.err.Error(), "host \"prod\" is used by tunnels: db") {
+		t.Fatalf("expected dependent tunnel error, got %v", model.err)
+	}
+	assertHost(t, "prod", config.Host{Host: "prod.example", User: "deploy"})
+	assertTunnel(t, "db", config.Tunnel{Host: "prod", Type: "local", LocalPort: 5432, RemoteHost: "127.0.0.1", RemotePort: 5432})
+}
+
 func TestTUIRemoveConfirmKeyHandling(t *testing.T) {
 	tests := []struct {
 		name       string
