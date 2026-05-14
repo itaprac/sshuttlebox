@@ -713,7 +713,7 @@ func (m tuiModel) updateRemove(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = tuiScreenMain
 		m.status = fmt.Sprintf("Removed host %q", item.name)
 		m.err = nil
-	case "n", "N", "esc", "q":
+	case "n", "N", "esc":
 		m.screen = tuiScreenMain
 		m.status = "Cancelled."
 		m.err = nil
@@ -2230,10 +2230,33 @@ func truncate(value string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	if width <= 3 || lipgloss.Width(value) <= width {
+	if lipgloss.Width(value) <= width {
 		return value
 	}
-	return value[:width-3] + "..."
+	if width <= 3 {
+		return strings.Repeat(".", width)
+	}
+	return prefixByWidth(value, width-3) + "..."
+}
+
+func prefixByWidth(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	lastGood := 0
+	for i := range value {
+		if i == 0 {
+			continue
+		}
+		if lipgloss.Width(value[:i]) > width {
+			return value[:lastGood]
+		}
+		lastGood = i
+	}
+	if lipgloss.Width(value) <= width {
+		return value
+	}
+	return value[:lastGood]
 }
 
 func wrapText(value string, width int) string {
@@ -2390,6 +2413,12 @@ func splitByWidth(value string, width int) (string, string) {
 			return value[:lastGood], value[lastGood:]
 		}
 		lastGood = i
+	}
+	if lipgloss.Width(value) > width {
+		if lastGood == 0 {
+			return value, ""
+		}
+		return value[:lastGood], value[lastGood:]
 	}
 	return value, ""
 }

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -63,6 +64,48 @@ func TestTUIFormAddsEditsAndRemovesHost(t *testing.T) {
 	assertHostMissing(t, "staging")
 	if !strings.Contains(model.status, "Removed host \"staging\"") {
 		t.Fatalf("unexpected remove status %q", model.status)
+	}
+}
+
+func TestTUIRemoveConfirmKeyHandling(t *testing.T) {
+	tests := []struct {
+		name       string
+		msg        tea.KeyMsg
+		wantScreen tuiScreen
+		wantStatus string
+	}{
+		{name: "q is no-op", msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}, wantScreen: tuiScreenRemove},
+		{name: "esc cancels", msg: keyMsg(tea.KeyEsc), wantScreen: tuiScreenMain, wantStatus: "Cancelled."},
+		{name: "n cancels", msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}, wantScreen: tuiScreenMain, wantStatus: "Cancelled."},
+		{name: "N cancels", msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("N")}, wantScreen: tuiScreenMain, wantStatus: "Cancelled."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withTempHome(t)
+			path, _, err := config.Init()
+			if err != nil {
+				t.Fatalf("init config: %v", err)
+			}
+			cfg := config.Default()
+			cfg.Hosts["prod"] = config.Host{Host: "prod.example"}
+			if err := config.Save(path, cfg); err != nil {
+				t.Fatalf("save config: %v", err)
+			}
+
+			model := newTUIModelWithState(path, cfg, nil)
+			model.screen = tuiScreenRemove
+			updated, _ := model.updateRemove(tt.msg)
+			model = updated.(tuiModel)
+
+			if model.screen != tt.wantScreen {
+				t.Fatalf("screen = %v, want %v", model.screen, tt.wantScreen)
+			}
+			if model.status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", model.status, tt.wantStatus)
+			}
+			assertHost(t, "prod", config.Host{Host: "prod.example"})
+		})
 	}
 }
 
@@ -382,6 +425,33 @@ func TestTUISelectedRowStaysInsideListWidth(t *testing.T) {
 	rendered := selectedStyle.Render(fitRow("> "+row, width))
 	if got := lipgloss.Width(rendered); got > width {
 		t.Fatalf("selected row width = %d, want <= %d; row %q", got, width, rendered)
+	}
+}
+
+func TestTruncateKeepsUTF8AndDisplayWidth(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		width int
+	}{
+		{name: "polish", value: "żółć-prod", width: 6},
+		{name: "cjk", value: "日本語-prod", width: 7},
+		{name: "emoji", value: "🚀-prod", width: 5},
+		{name: "narrow polish", value: "żółć", width: 3},
+		{name: "narrow cjk", value: "日本語", width: 2},
+		{name: "narrow emoji", value: "🚀", width: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncate(tt.value, tt.width)
+			if !utf8.ValidString(got) {
+				t.Fatalf("truncate returned invalid UTF-8: %q", got)
+			}
+			if gotWidth := lipgloss.Width(got); gotWidth > tt.width {
+				t.Fatalf("truncate width = %d, want <= %d for %q", gotWidth, tt.width, got)
+			}
+		})
 	}
 }
 

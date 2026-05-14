@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -30,6 +31,29 @@ const defaultSSHPort = 22
 type App struct {
 	in  io.Reader
 	out io.Writer
+}
+
+type hostListItem struct {
+	Name         string `json:"name"`
+	Host         string `json:"host"`
+	User         string `json:"user"`
+	PasswordSet  bool   `json:"passwordSet"`
+	Port         int    `json:"port"`
+	IdentityFile string `json:"identityFile"`
+	Group        string `json:"group"`
+}
+
+type tunnelListItem struct {
+	Name        string `json:"name"`
+	Host        string `json:"host"`
+	Type        string `json:"type"`
+	BindAddress string `json:"bindAddress"`
+	LocalPort   int    `json:"localPort"`
+	RemoteHost  string `json:"remoteHost"`
+	RemotePort  int    `json:"remotePort"`
+	Group       string `json:"group"`
+	Status      string `json:"status"`
+	Running     bool   `json:"running"`
 }
 
 func Run(args []string) error {
@@ -326,9 +350,21 @@ func (a App) runAdd(args []string) error {
 }
 
 func (a App) runList(args []string) error {
-	if len(args) != 0 {
-		return errors.New("usage: shbx list")
+	const usage = "usage: shbx list [--group group] [--json]"
+
+	fs := flag.NewFlagSet("list", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	groupFlag := fs.String("group", "", "Filter by group")
+	jsonFlag := fs.Bool("json", false, "Print JSON")
+
+	if err := fs.Parse(args); err != nil {
+		return errors.New(usage)
 	}
+	if fs.NArg() != 0 {
+		return errors.New(usage)
+	}
+	group := strings.TrimSpace(*groupFlag)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -336,10 +372,30 @@ func (a App) runList(args []string) error {
 	}
 
 	names := make([]string, 0, len(cfg.Hosts))
-	for name := range cfg.Hosts {
+	for name, host := range cfg.Hosts {
+		if group != "" && host.Group != group {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
+
+	if *jsonFlag {
+		items := make([]hostListItem, 0, len(names))
+		for _, name := range names {
+			host := cfg.Hosts[name]
+			items = append(items, hostListItem{
+				Name:         name,
+				Host:         host.Host,
+				User:         host.User,
+				PasswordSet:  host.Password != "",
+				Port:         host.Port,
+				IdentityFile: host.IdentityFile,
+				Group:        host.Group,
+			})
+		}
+		return json.NewEncoder(a.out).Encode(items)
+	}
 
 	if len(names) == 0 {
 		fmt.Fprintln(a.out, "No saved hosts.")
@@ -584,9 +640,21 @@ func (a App) runTunnelAdd(args []string) error {
 }
 
 func (a App) runTunnelList(args []string) error {
-	if len(args) != 0 {
-		return errors.New("usage: shbx tunnel list")
+	const usage = "usage: shbx tunnel list [--group group] [--json]"
+
+	fs := flag.NewFlagSet("tunnel list", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	groupFlag := fs.String("group", "", "Filter by group")
+	jsonFlag := fs.Bool("json", false, "Print JSON")
+
+	if err := fs.Parse(args); err != nil {
+		return errors.New(usage)
 	}
+	if fs.NArg() != 0 {
+		return errors.New(usage)
+	}
+	group := strings.TrimSpace(*groupFlag)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -594,12 +662,18 @@ func (a App) runTunnelList(args []string) error {
 	}
 
 	names := make([]string, 0, len(cfg.Tunnels))
-	for name := range cfg.Tunnels {
+	for name, tunnel := range cfg.Tunnels {
+		if group != "" && tunnel.Group != group {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
 	if len(names) == 0 {
+		if *jsonFlag {
+			return json.NewEncoder(a.out).Encode([]tunnelListItem{})
+		}
 		fmt.Fprintln(a.out, "No saved tunnels.")
 		return nil
 	}
@@ -607,6 +681,27 @@ func (a App) runTunnelList(args []string) error {
 	state, err := tunnelstate.Prune()
 	if err != nil {
 		return err
+	}
+
+	if *jsonFlag {
+		items := make([]tunnelListItem, 0, len(names))
+		for _, name := range names {
+			tunnel := cfg.Tunnels[name]
+			status := formatTunnelStatus(state, name)
+			items = append(items, tunnelListItem{
+				Name:        name,
+				Host:        tunnel.Host,
+				Type:        tunnel.Type,
+				BindAddress: tunnel.BindAddress,
+				LocalPort:   tunnel.LocalPort,
+				RemoteHost:  tunnel.RemoteHost,
+				RemotePort:  tunnel.RemotePort,
+				Group:       tunnel.Group,
+				Status:      status,
+				Running:     status == "running",
+			})
+		}
+		return json.NewEncoder(a.out).Encode(items)
 	}
 
 	fmt.Fprintf(a.out, "%-16s %-9s %-12s %-14s %-16s %s\n", "NAME", "STATUS", "TYPE", "GROUP", "SSH HOST", "FORWARD")
