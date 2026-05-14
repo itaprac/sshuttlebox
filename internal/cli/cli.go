@@ -63,6 +63,8 @@ func (a App) Run(args []string) error {
 		return a.runTunnel(args[1:])
 	case "group":
 		return a.runGroup(args[1:])
+	case "export":
+		return a.runExport(args[1:])
 	case "edit":
 		return a.runEdit(args[1:])
 	case "remove":
@@ -73,6 +75,8 @@ func (a App) Run(args []string) error {
 		return a.runCompletion(args[1:])
 	case "doctor":
 		return a.runDoctor(args[1:])
+	case "import":
+		return a.runImport(args[1:])
 	case "__complete":
 		return a.runComplete(args[1:])
 	default:
@@ -1268,7 +1272,7 @@ func (a App) runRemove(args []string) error {
 
 func (a App) runConfig(args []string) error {
 	if len(args) == 0 {
-		return errors.New("missing config command; available: init, path, status")
+		return errors.New("missing config command; available: init, path, status, export, backup, restore")
 	}
 
 	switch args[0] {
@@ -1305,8 +1309,14 @@ func (a App) runConfig(args []string) error {
 		}
 		fmt.Fprintf(a.out, "Config: %s %s\n", path, status)
 		return nil
+	case "export":
+		return a.runConfigExport(args[1:])
+	case "backup":
+		return a.runConfigBackup(args[1:])
+	case "restore":
+		return a.runConfigRestore(args[1:])
 	default:
-		return fmt.Errorf("unknown config command %q; available: init, path, status", strings.Join(args, " "))
+		return fmt.Errorf("unknown config command %q; available: init, path, status, export, backup, restore", strings.Join(args, " "))
 	}
 }
 
@@ -1415,14 +1425,19 @@ Commands:
   connect <name>   Connect to saved host over SSH
   tunnel           Add, list, show, start, stop, or remove SSH tunnels
   group            Add, list, show, rename, or remove groups
+  export           Export saved data
   edit <name>      Edit saved host
   remove <name>    Remove saved host
   ui               Open the interactive terminal UI (default)
   completion       Generate shell completion script
   doctor           Check config, SSH, keys, and tunnels
+  import           Import hosts from other tools
   config init      Create config file if it does not exist
   config path      Print config file path
   config status    Show config file status
+  config export    Export config JSON
+  config backup    Back up config JSON
+  config restore   Restore config JSON
   version          Print version
   help             Show this help
 
@@ -1450,6 +1465,13 @@ Edit options:
 Connect options:
   --dry-run                    Print SSH command without connecting
   --print                      Alias for --dry-run
+
+Export:
+  shbx export ssh-config       Print OpenSSH config for saved hosts
+  shbx export ssh-config --dry-run
+                                Print OpenSSH config for saved hosts
+  shbx export ssh-config --output ~/.ssh/config.d/shbx
+                                Write OpenSSH config without overwriting
 
 Tunnel examples:
   shbx tunnel add               Add tunnel interactively
@@ -1489,6 +1511,15 @@ Completion:
 
 Doctor:
   shbx doctor                   Check config, SSH, keys, and tunnels
+
+Import:
+  shbx import ssh-config         Import hosts from ~/.ssh/config
+  shbx import ssh-config --dry-run
+
+Config:
+  shbx config export --output file
+  shbx config backup
+  shbx config restore file [--dry-run]
 `)
 }
 
@@ -1719,7 +1750,7 @@ func completePrefix(args []string) string {
 }
 
 func completeCommandNames(prefix string) []string {
-	commands := []string{"add", "list", "show", "connect", "tunnel", "group", "edit", "remove", "ui", "completion", "doctor", "config", "version", "help"}
+	commands := []string{"add", "list", "show", "connect", "tunnel", "group", "export", "edit", "remove", "ui", "completion", "doctor", "import", "config", "version", "help"}
 	return filterSortedPrefix(commands, prefix)
 }
 
@@ -1813,6 +1844,12 @@ const bashCompletionScript = `_shbx_completion()
                 return 0
             fi
             ;;
+        export)
+            if [[ ${COMP_CWORD} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "ssh-config" -- "$cur") )
+                return 0
+            fi
+            ;;
     esac
 }
 complete -F _shbx_completion shbx
@@ -1821,7 +1858,7 @@ complete -F _shbx_completion shbx
 const zshCompletionScript = `#compdef shbx
 
 _shbx() {
-  local -a commands hosts tunnels groups tunnel_commands group_commands shells
+  local -a commands hosts tunnels groups tunnel_commands group_commands export_commands shells
 
   if (( CURRENT == 2 )); then
     commands=("${(@f)$(shbx __complete commands -- "$words[CURRENT]")}")
@@ -1868,6 +1905,13 @@ _shbx() {
         return
       fi
       ;;
+    export)
+      if (( CURRENT == 3 )); then
+        export_commands=(ssh-config)
+        _describe 'export commands' export_commands
+        return
+      fi
+      ;;
   esac
 }
 
@@ -1900,6 +1944,7 @@ complete -c shbx -n '__shbx_tunnel_needs_subcommand' -a 'add list show start sto
 complete -c shbx -n '__shbx_tunnel_uses_name_command' -a '(shbx __complete tunnels -- (commandline -ct))'
 complete -c shbx -n '__shbx_using_command group' -a 'add list show remove rename'
 complete -c shbx -n '__shbx_using_command completion' -a 'bash zsh fish'
+complete -c shbx -n '__shbx_using_command export' -a 'ssh-config'
 `
 
 func buildSSHArgs(host config.Host) []string {

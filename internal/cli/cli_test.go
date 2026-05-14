@@ -43,6 +43,57 @@ func TestConfigCommands(t *testing.T) {
 	}
 }
 
+func TestConfigExportRequiresOutputWhenPasswordsExist(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy", Password: "secret"})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+
+	err := app.Run([]string{"config", "export"})
+	if err == nil {
+		t.Fatalf("expected export error")
+	}
+	if strings.Contains(out.String(), "secret") || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("export leaked password: out=%q err=%q", out.String(), err)
+	}
+
+	exportPath := filepath.Join(t.TempDir(), "config.json")
+	if err := app.Run([]string{"config", "export", "--output", exportPath}); err != nil {
+		t.Fatalf("export with output: %v", err)
+	}
+	data, err := os.ReadFile(exportPath)
+	if err != nil {
+		t.Fatalf("read export: %v", err)
+	}
+	if !strings.Contains(string(data), "secret") {
+		t.Fatalf("expected exported file to contain saved password")
+	}
+}
+
+func TestConfigRestoreAcceptsDryRunAfterFile(t *testing.T) {
+	withTempHome(t)
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"config", "init"}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	restorePath := filepath.Join(t.TempDir(), "config.json")
+	if err := config.Save(restorePath, config.Default()); err != nil {
+		t.Fatalf("write restore file: %v", err)
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"config", "restore", restorePath, "--dry-run"}); err != nil {
+		t.Fatalf("restore file --dry-run: %v", err)
+	}
+	if !strings.Contains(out.String(), "Restore OK") {
+		t.Fatalf("expected dry-run output, got %q", out.String())
+	}
+}
+
 func TestAddWithoutNamePromptsAndListShowsTable(t *testing.T) {
 	withTempHome(t)
 

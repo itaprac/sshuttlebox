@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const (
@@ -128,6 +129,75 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+func ValidateData(data []byte) error {
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse config: %w", err)
+	}
+	if cfg.Version <= 0 {
+		return fmt.Errorf("config version must be positive")
+	}
+	return nil
+}
+
+func Export(output string) error {
+	path, err := Path()
+	if err != nil {
+		return err
+	}
+	return CopyFile(path, output)
+}
+
+func Backup() (string, error) {
+	path, err := Path()
+	if err != nil {
+		return "", err
+	}
+
+	backupPath := fmt.Sprintf("%s.backup-%s", path, time.Now().Format("20060102-150405.000000000"))
+	if err := CopyFile(path, backupPath); err != nil {
+		return "", err
+	}
+	return backupPath, nil
+}
+
+func Restore(source string, dryRun bool) (string, error) {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return "", fmt.Errorf("read restore file: %w", err)
+	}
+	if err := ValidateData(data); err != nil {
+		return "", err
+	}
+	if dryRun {
+		return "", nil
+	}
+
+	path, err := Path()
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("config does not exist; run: shbx config init")
+		}
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("config path is a directory")
+	}
+
+	backupPath, err := Backup()
+	if err != nil {
+		return "", err
+	}
+	if err := writeFile(path, data, info.Mode().Perm()); err != nil {
+		return "", err
+	}
+	return backupPath, nil
+}
+
 func Save(path string, cfg Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
@@ -143,5 +213,33 @@ func Save(path string, cfg Config) error {
 		return fmt.Errorf("write config: %w", err)
 	}
 
+	return nil
+}
+
+func CopyFile(source, dest string) error {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%s is a directory", source)
+	}
+	return writeFile(dest, data, info.Mode().Perm())
+}
+
+func writeFile(path string, data []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	if err := os.WriteFile(path, data, mode); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		return fmt.Errorf("set file permissions: %w", err)
+	}
 	return nil
 }

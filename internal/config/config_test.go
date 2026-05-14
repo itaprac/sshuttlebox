@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -152,5 +153,89 @@ func TestLoadMissingConfigReturnsHelpfulError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "config does not exist; run: shbx config init") {
 		t.Fatalf("unexpected error %q", err)
+	}
+}
+
+func TestExportBackupRestorePreserveBytesAndMode(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	path, _, err := Init()
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	original := []byte("{\n  \"hosts\": {},\n  \"version\": 1,\n  \"tunnels\": {}\n}\n")
+	if err := os.WriteFile(path, original, 0o640); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatalf("chmod original: %v", err)
+	}
+
+	exportPath := filepath.Join(t.TempDir(), "export.json")
+	if err := Export(exportPath); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	assertFileBytesAndMode(t, exportPath, original, 0o640)
+
+	backupPath, err := Backup()
+	if err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+	assertFileBytesAndMode(t, backupPath, original, 0o640)
+
+	restoreData := []byte("{\"version\":1,\"hosts\":{\"prod\":{\"host\":\"prod.example\"}},\"tunnels\":{}}\n")
+	restorePath := filepath.Join(t.TempDir(), "restore.json")
+	if err := os.WriteFile(restorePath, restoreData, 0o600); err != nil {
+		t.Fatalf("write restore: %v", err)
+	}
+
+	restoreBackupPath, err := Restore(restorePath, false)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	assertFileBytesAndMode(t, restoreBackupPath, original, 0o640)
+	assertFileBytesAndMode(t, path, restoreData, 0o640)
+}
+
+func TestRestoreRejectsInvalidConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	path, _, err := Init()
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	original := []byte("{\"version\":1,\"hosts\":{},\"tunnels\":{}}\n")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+
+	restorePath := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(restorePath, []byte("{\"version\":0,\"hosts\":{},\"tunnels\":{}}\n"), 0o600); err != nil {
+		t.Fatalf("write restore: %v", err)
+	}
+
+	_, err = Restore(restorePath, false)
+	if err == nil {
+		t.Fatalf("expected invalid restore error")
+	}
+	assertFileBytesAndMode(t, path, original, 0o600)
+}
+
+func assertFileBytesAndMode(t *testing.T, path string, want []byte, mode os.FileMode) {
+	t.Helper()
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("%s bytes = %q, want %q", path, got, want)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if info.Mode().Perm() != mode {
+		t.Fatalf("%s mode = %04o, want %04o", path, info.Mode().Perm(), mode)
 	}
 }
