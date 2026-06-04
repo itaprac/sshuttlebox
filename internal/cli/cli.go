@@ -24,7 +24,7 @@ import (
 	"golang.org/x/term"
 )
 
-const Version = "0.3.3"
+const Version = "0.3.4"
 
 const defaultSSHPort = 22
 
