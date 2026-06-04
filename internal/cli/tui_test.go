@@ -805,7 +805,7 @@ func TestTUICommandPaletteRunsActions(t *testing.T) {
 		t.Fatalf("screen = %v, want command palette", model.screen)
 	}
 	view := model.View()
-	for _, want := range []string{"Command palette", "Connect host", "Run doctor"} {
+	for _, want := range []string{"Command palette", "Connect host", "Open SFTP", "Run doctor"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("palette view missing %q in %q", want, view)
 		}
@@ -844,7 +844,7 @@ func TestTUICommandPaletteFiltersTypedQuery(t *testing.T) {
 
 	updated, _ := model.openPalette()
 	model = updated.(tuiModel)
-	updated, _ = model.updatePalette(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("psc")})
+	updated, _ = model.updatePalette(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ssh")})
 	model = updated.(tuiModel)
 
 	items := model.filteredPaletteItems()
@@ -855,8 +855,36 @@ func TestTUICommandPaletteFiltersTypedQuery(t *testing.T) {
 		t.Fatalf("paletteCursor = %d, want 0", model.paletteCursor)
 	}
 	view := model.paletteView()
-	if !strings.Contains(view, "> psc") || strings.Contains(view, "Run doctor") {
+	if !strings.Contains(view, "> ssh") || strings.Contains(view, "Run doctor") {
 		t.Fatalf("palette view did not show filtered query/results: %q", view)
+	}
+}
+
+func TestTUISFTPShortcutAndPreview(t *testing.T) {
+	model := newTUIModelWithState("", config.Config{
+		Version: 1,
+		Hosts: map[string]config.Host{
+			"prod": {Host: "prod.example", User: "deploy"},
+		},
+	}, nil)
+
+	updated, cmd := model.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	model = updated.(tuiModel)
+	if cmd == nil || model.sftpName != "prod" {
+		t.Fatalf("sftp shortcut did not quit with selected host: cmd nil=%v sftpName=%q", cmd == nil, model.sftpName)
+	}
+
+	model.sftpName = ""
+	updated, _ = model.runSelectedSFTPPreview()
+	model = updated.(tuiModel)
+	if model.screen != tuiScreenPreview {
+		t.Fatalf("screen = %v, want preview", model.screen)
+	}
+	if model.outputTitle != "SFTP command" {
+		t.Fatalf("outputTitle = %q, want SFTP command", model.outputTitle)
+	}
+	if !strings.Contains(model.status, "sftp -P 22 deploy@prod.example") {
+		t.Fatalf("SFTP preview missing command in %q", model.status)
 	}
 }
 
@@ -874,7 +902,7 @@ func TestTUICommandPaletteFiltersHintAndAllowsRegularRunes(t *testing.T) {
 	model = updated.(tuiModel)
 
 	items := model.filteredPaletteItems()
-	if len(items) != 4 {
+	if len(items) != 6 {
 		t.Fatalf("filtered items = %#v, want selected-host actions by hint", items)
 	}
 	for _, item := range items {
@@ -967,6 +995,9 @@ func TestUIHelpAndCompletionMentionCommand(t *testing.T) {
 	if !strings.Contains(out.String(), "doctor           Check config, SSH, keys, and tunnels") {
 		t.Fatalf("help missing doctor command in %q", out.String())
 	}
+	if !strings.Contains(out.String(), "sftp             Open SFTP or run simple SFTP file commands") {
+		t.Fatalf("help missing sftp command in %q", out.String())
+	}
 
 	out.Reset()
 	if err := app.Run([]string{"__complete", "commands", "--", "u"}); err != nil {
@@ -982,6 +1013,14 @@ func TestUIHelpAndCompletionMentionCommand(t *testing.T) {
 	}
 	if out.String() != "doctor\n" {
 		t.Fatalf("completion output = %q, want doctor", out.String())
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"__complete", "commands", "--", "s"}); err != nil {
+		t.Fatalf("complete commands: %v", err)
+	}
+	if out.String() != "sftp\nshow\n" {
+		t.Fatalf("completion output = %q, want sftp and show", out.String())
 	}
 }
 

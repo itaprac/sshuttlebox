@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="sshuttlebox is a small SSH host and tunnel manager for your terminal." />
+    <meta name="description" content="sshuttlebox is a small SSH host, SFTP, and tunnel manager for your terminal." />
     <meta name="color-scheme" content="dark" />
     <title>sshuttlebox — SSH hosts and tunnels, kept tidy</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -880,8 +880,8 @@
             </h1>
             <p class="lede">
               A compact terminal manager for the SSH targets you actually use. Save hosts under short
-              names, organize them into groups, run local/remote/SOCKS tunnels, and connect with one
-              command — or browse everything from an interactive TUI.
+              names, open SFTP sessions, move files, run local/remote/SOCKS tunnels, and connect with
+              one command — or browse everything from an interactive TUI.
             </p>
 
             <button type="button" class="install" id="install" aria-label="Copy install command">
@@ -907,6 +907,8 @@
               <span class="line"><span class="ok">✓</span>Host <span class="str">"prod"</span> saved</span>
               <span class="line"><span class="prompt">❯</span>shbx connect <span class="arg">prod</span></span>
               <span class="line"><span class="dim">Welcome to Ubuntu 22.04.3 LTS</span></span>
+              <span class="line"><span class="prompt">❯</span>shbx sftp ls <span class="arg">prod</span> <span class="str">/var/www</span></span>
+              <span class="line"><span class="dim">drwxr-xr-x deploy deploy releases</span></span>
               <span class="line">deploy@prod:~$<span class="cursor"></span></span>
             </div>
           </div>
@@ -967,8 +969,8 @@
             <div class="tui-status" aria-hidden="true">
               <div class="keys">
                 <span><b>↵</b> connect</span>
+                <span><b>s</b> sftp</span>
                 <span><b>e</b> edit</span>
-                <span><b>t</b> tunnel</span>
                 <span><b>:</b> palette</span>
               </div>
               <div>7 hosts · 3 tunnels · 1 running</div>
@@ -981,8 +983,8 @@
           <h2>Everything you need,<br />without leaving the terminal.</h2>
           <p>
             Run <code style="font-family:var(--mono);color:var(--accent)">shbx</code> with no
-            arguments to launch the TUI. Browse hosts, start tunnels, and connect — all from a
-            single screen, with a command palette for any action.
+            arguments to launch the TUI. Browse hosts, open SFTP, start tunnels, and connect — all
+            from a single screen, with a command palette for any action.
           </p>
         </div>
         </div>
@@ -1010,6 +1012,16 @@
             <div class="desc">Local, remote, and SOCKS port forwarding with start/stop lifecycle management.</div>
           </div>
           <div class="feature">
+            <div class="icon">⇅</div>
+            <div class="name">SFTP helpers</div>
+            <div class="desc">Open saved hosts with SFTP, list remote paths, and move files with get/put commands.</div>
+          </div>
+          <div class="feature">
+            <div class="icon">$?</div>
+            <div class="name">Dry-run preview</div>
+            <div class="desc">Print the exact SSH, SFTP, or tunnel command before running it.</div>
+          </div>
+          <div class="feature">
             <div class="icon">⊞</div>
             <div class="name">Groups</div>
             <div class="desc">Organize related hosts and tunnels into named groups for quick filtering.</div>
@@ -1023,6 +1035,11 @@
             <div class="icon">⚕</div>
             <div class="name">Doctor checks</div>
             <div class="desc">Inspect config, SSH availability, keys, and tunnel state with a single command.</div>
+          </div>
+          <div class="feature">
+            <div class="icon">••</div>
+            <div class="name">Password auth</div>
+            <div class="desc">Keys stay preferred, but saved passwords are available for hosts that need them.</div>
           </div>
         </div>
       </section>
@@ -1046,6 +1063,14 @@
             <div class="command-row">
               <code>shbx connect <span class="arg">&lt;name&gt;</span></code>
               <span class="desc">Open an SSH session</span>
+            </div>
+            <div class="command-row">
+              <code>shbx sftp <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Open an SFTP session</span>
+            </div>
+            <div class="command-row">
+              <code>shbx sftp get <span class="arg">&lt;name&gt;</span></code>
+              <span class="desc">Download from a saved host</span>
             </div>
             <div class="command-row">
               <code>shbx edit <span class="arg">&lt;name&gt;</span></code>
@@ -1139,9 +1164,10 @@
           <div class="step">
             <span class="n">3</span>
             <div class="step-body">
-              <div class="label">Connect or open the TUI</div>
+              <div class="label">Connect, open SFTP, or launch the TUI</div>
               <div class="code">
                 <span class="line"><span class="p">$</span>shbx connect <span class="arg">prod</span></span>
+                <span class="line"><span class="p">$</span>shbx sftp <span class="arg">prod</span></span>
                 <span class="line"><span class="p">$</span>shbx</span>
               </div>
             </div>

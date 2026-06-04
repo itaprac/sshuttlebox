@@ -47,6 +47,7 @@ interactive terminal UI.
 - **Interactive TUI** — browse, edit, and connect without remembering flags
 - **Command palette** — run common TUI actions with `:` or `ctrl+p`
 - **Tunnels** — local, remote, and SOCKS forwarding with start/stop lifecycle
+- **SFTP helpers** — open saved hosts or run common list/get/put file commands
 - **Groups** — organize related hosts and tunnels for quick filtering
 - **Shell completion** — bash, zsh, and fish for all saved names
 - **Doctor checks** — inspect config, SSH, keys, and tunnel state
@@ -118,6 +119,16 @@ shbx edit staging
 shbx remove staging
 ```
 
+Open an SFTP session or run common file commands through a saved host:
+
+```bash
+shbx sftp prod
+shbx sftp prod /var/www
+shbx sftp ls prod /var/www
+shbx sftp get prod /var/log/app.log ./app.log
+shbx sftp put prod ./build.tar.gz /tmp/build.tar.gz
+```
+
 ### Tunnels
 
 Add and start a **local** port-forwarding tunnel through a saved host:
@@ -154,6 +165,7 @@ shbx group show work
 | `shbx list` | List saved hosts |
 | `shbx show <name>` | Show saved host details |
 | `shbx connect <name>` | Connect to a saved host |
+| `shbx sftp ...` | Open SFTP or run list/get/put file commands |
 | `shbx edit <name>` | Edit a saved host |
 | `shbx remove <name>` | Remove a saved host |
 | `shbx tunnel ...` | Add, list, show, start, stop, or remove SSH tunnels |

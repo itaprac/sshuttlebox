@@ -362,6 +362,96 @@ func TestConnectDryRunWithPasswordUsesSSHPasswordWrapper(t *testing.T) {
 	}
 }
 
+func TestSFTPOpenDryRunAndPrint(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{
+		Host:         "192.0.2.10",
+		User:         "deploy",
+		Port:         2222,
+		IdentityFile: "/tmp/key with space",
+	})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"sftp", "prod", "/var/www", "--dry-run"}); err != nil {
+		t.Fatalf("sftp dry-run: %v", err)
+	}
+	want := "sftp -P 2222 -i '/tmp/key with space' deploy@192.0.2.10:/var/www\n"
+	if out.String() != want {
+		t.Fatalf("sftp dry-run output = %q, want %q", out.String(), want)
+	}
+
+	out.Reset()
+	if err := app.Run([]string{"sftp", "open", "prod", "--print"}); err != nil {
+		t.Fatalf("sftp print: %v", err)
+	}
+	want = "sftp -P 2222 -i '/tmp/key with space' deploy@192.0.2.10\n"
+	if out.String() != want {
+		t.Fatalf("sftp print output = %q, want %q", out.String(), want)
+	}
+}
+
+func TestSFTPBatchDryRunCommands(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{Host: "prod.example", User: "deploy"})
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "ls",
+			args: []string{"sftp", "ls", "prod", "/var/www", "--dry-run"},
+			want: "printf %s 'ls \"/var/www\"\n' | sftp -b - -P 22 deploy@prod.example\n",
+		},
+		{
+			name: "get",
+			args: []string{"sftp", "get", "prod", "/remote/file with space.txt", "./local file.txt", "--dry-run"},
+			want: "printf %s 'get \"/remote/file with space.txt\" \"./local file.txt\"\n' | sftp -b - -P 22 deploy@prod.example\n",
+		},
+		{
+			name: "put",
+			args: []string{"sftp", "put", "prod", "./local.txt", "/remote/local.txt", "--dry-run"},
+			want: "printf %s 'put \"./local.txt\" \"/remote/local.txt\"\n' | sftp -b - -P 22 deploy@prod.example\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			app := App{in: strings.NewReader(""), out: &out}
+			if err := app.Run(tt.args); err != nil {
+				t.Fatalf("sftp batch dry-run: %v", err)
+			}
+			if out.String() != tt.want {
+				t.Fatalf("output = %q, want %q", out.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestSFTPDryRunWithPasswordDoesNotLeakSecret(t *testing.T) {
+	withTempHome(t)
+	addHost(t, "prod", config.Host{
+		Host:     "prod.example",
+		User:     "deploy",
+		Password: "secret",
+	})
+
+	var out bytes.Buffer
+	app := App{in: strings.NewReader(""), out: &out}
+	if err := app.Run([]string{"sftp", "ls", "prod", "--dry-run"}); err != nil {
+		t.Fatalf("sftp dry-run: %v", err)
+	}
+	if !strings.Contains(out.String(), "# password: set") {
+		t.Fatalf("dry-run missing password marker in %q", out.String())
+	}
+	if strings.Contains(out.String(), "secret") {
+		t.Fatalf("dry-run leaked password in %q", out.String())
+	}
+}
+
 func TestConnectShowsStartAndClosedStatus(t *testing.T) {
 	withTempHome(t)
 	t.Setenv("SHBX_SSH_BIN", fakeSSHExitBinary(t, 0))

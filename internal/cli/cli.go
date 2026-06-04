@@ -83,6 +83,8 @@ func (a App) Run(args []string) error {
 		return a.runShow(args[1:])
 	case "connect":
 		return a.runConnect(args[1:])
+	case "sftp":
+		return a.runSFTP(args[1:])
 	case "tunnel":
 		return a.runTunnel(args[1:])
 	case "group":
@@ -509,6 +511,100 @@ func (a App) runConnect(args []string) error {
 		return fmt.Errorf("connect %q: %w", name, runErr)
 	}
 	fmt.Fprintln(a.out, "Connection closed.")
+	return nil
+}
+
+func (a App) runSFTP(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: shbx sftp [open|ls|get|put] <host> [paths...] [--dry-run|--print]")
+	}
+
+	switch args[0] {
+	case "open":
+		return a.runSFTPOpen(args[1:])
+	case "ls":
+		return a.runSFTPBatch("ls", args[1:])
+	case "get":
+		return a.runSFTPBatch("get", args[1:])
+	case "put":
+		return a.runSFTPBatch("put", args[1:])
+	default:
+		return a.runSFTPOpen(args)
+	}
+}
+
+func (a App) runSFTPOpen(args []string) error {
+	const usage = "usage: shbx sftp [open] <host> [remote-path] [--dry-run|--print]"
+
+	positional, dryRun, err := parseDryRunArgs(args)
+	if err != nil {
+		return fmt.Errorf("%s: %w", usage, err)
+	}
+	if len(positional) < 1 || len(positional) > 2 {
+		return errors.New(usage)
+	}
+
+	name := strings.TrimSpace(positional[0])
+	if name == "" {
+		return errors.New("host name cannot be empty")
+	}
+	remotePath := ""
+	if len(positional) == 2 {
+		remotePath = positional[1]
+	}
+
+	host, err := loadNamedHost(name)
+	if err != nil {
+		return err
+	}
+
+	sftpArgs := buildSFTPArgs(host, remotePath)
+	if dryRun {
+		fmt.Fprintln(a.out, sftpCommandString(host, sftpArgs))
+		return nil
+	}
+
+	fmt.Fprintf(a.out, "Opening SFTP to %q (%s)...\n", name, formatListTarget(host))
+	if err := runSFTPProcess(host, sftpArgs, ""); err != nil {
+		return fmt.Errorf("sftp %q: %w", name, err)
+	}
+	fmt.Fprintln(a.out, "SFTP session closed.")
+	return nil
+}
+
+func (a App) runSFTPBatch(operation string, args []string) error {
+	usage := fmt.Sprintf("usage: shbx sftp %s %s [--dry-run|--print]", operation, sftpUsageOperands(operation))
+
+	positional, dryRun, err := parseDryRunArgs(args)
+	if err != nil {
+		return fmt.Errorf("%s: %w", usage, err)
+	}
+	if err := validateSFTPBatchOperands(operation, positional); err != nil {
+		return fmt.Errorf("%s: %w", usage, err)
+	}
+
+	name := strings.TrimSpace(positional[0])
+	if name == "" {
+		return errors.New("host name cannot be empty")
+	}
+	host, err := loadNamedHost(name)
+	if err != nil {
+		return err
+	}
+
+	batch, err := buildSFTPBatch(operation, positional[1:])
+	if err != nil {
+		return err
+	}
+	sftpArgs := buildSFTPArgs(host, "")
+	if dryRun {
+		fmt.Fprintln(a.out, sftpBatchCommandString(host, sftpArgs, batch))
+		return nil
+	}
+
+	if err := runSFTPProcess(host, sftpArgs, batch); err != nil {
+		return fmt.Errorf("sftp %s %q: %w", operation, name, err)
+	}
 	return nil
 }
 
@@ -1518,6 +1614,7 @@ Commands:
   list             List saved hosts with SSH targets
   show <name>      Show saved host details
   connect <name>   Connect to saved host over SSH
+  sftp             Open SFTP or run simple SFTP file commands
   tunnel           Add, list, show, start, stop, or remove SSH tunnels
   group            Add, list, show, rename, or remove groups
   export           Export saved data
@@ -1560,6 +1657,18 @@ Edit options:
 Connect options:
   --dry-run                    Print SSH command without connecting
   --print                      Alias for --dry-run
+
+SFTP:
+  shbx sftp prod                Open an interactive SFTP session
+  shbx sftp prod /var/www       Open SFTP at a remote path
+  shbx sftp ls prod /var/www    List a remote directory
+  shbx sftp get prod /remote/file ./file
+                                Download a file
+  shbx sftp put prod ./file /remote/file
+                                Upload a file
+  shbx sftp open prod --dry-run
+  shbx sftp ls prod /var/www --dry-run
+                                Print SFTP commands without running them
 
 Export:
   shbx export ssh-config       Print OpenSSH config for saved hosts
@@ -1846,7 +1955,7 @@ func completePrefix(args []string) string {
 }
 
 func completeCommandNames(prefix string) []string {
-	commands := []string{"add", "list", "show", "connect", "tunnel", "group", "export", "edit", "remove", "ui", "completion", "doctor", "import", "config", "version", "help"}
+	commands := []string{"add", "list", "show", "connect", "sftp", "tunnel", "group", "export", "edit", "remove", "ui", "completion", "doctor", "import", "config", "version", "help"}
 	return filterSortedPrefix(commands, prefix)
 }
 
@@ -1914,6 +2023,16 @@ const bashCompletionScript = `_shbx_completion()
                 return 0
             fi
             ;;
+        sftp)
+            if [[ ${COMP_CWORD} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "open ls get put $(shbx __complete hosts -- "$cur")" -- "$cur") )
+                return 0
+            fi
+            if [[ ${COMP_CWORD} -eq 3 && ( "${COMP_WORDS[2]}" = "open" || "${COMP_WORDS[2]}" = "ls" || "${COMP_WORDS[2]}" = "get" || "${COMP_WORDS[2]}" = "put" ) ]]; then
+                COMPREPLY=( $(compgen -W "$(shbx __complete hosts -- "$cur")" -- "$cur") )
+                return 0
+            fi
+            ;;
         tunnel)
             if [[ ${COMP_CWORD} -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "add list show start stop remove" -- "$cur") )
@@ -1954,7 +2073,7 @@ complete -F _shbx_completion shbx
 const zshCompletionScript = `#compdef shbx
 
 _shbx() {
-  local -a commands hosts tunnels groups tunnel_commands group_commands export_commands shells
+  local -a commands hosts tunnels groups sftp_commands tunnel_commands group_commands export_commands shells
 
   if (( CURRENT == 2 )); then
     commands=("${(@f)$(shbx __complete commands -- "$words[CURRENT]")}")
@@ -1965,6 +2084,20 @@ _shbx() {
   case "$words[2]" in
     connect|show|edit|remove)
       if (( CURRENT == 3 )); then
+        hosts=("${(@f)$(shbx __complete hosts -- "$words[CURRENT]")}")
+        _describe 'saved hosts' hosts
+        return
+      fi
+      ;;
+    sftp)
+      if (( CURRENT == 3 )); then
+        sftp_commands=(open ls get put)
+        hosts=("${(@f)$(shbx __complete hosts -- "$words[CURRENT]")}")
+        _describe 'sftp commands' sftp_commands
+        _describe 'saved hosts' hosts
+        return
+      fi
+      if (( CURRENT == 4 )) && [[ "$words[3]" == (open|ls|get|put) ]]; then
         hosts=("${(@f)$(shbx __complete hosts -- "$words[CURRENT]")}")
         _describe 'saved hosts' hosts
         return
@@ -2034,14 +2167,63 @@ function __shbx_tunnel_uses_name_command
     test (count $cmd) -eq 3; and test $cmd[2] = tunnel; and contains -- $cmd[3] show start stop remove
 end
 
+function __shbx_sftp_needs_first_arg
+    set -l cmd (commandline -opc)
+    test (count $cmd) -eq 2; and test $cmd[2] = sftp
+end
+
+function __shbx_sftp_uses_host_subcommand
+    set -l cmd (commandline -opc)
+    test (count $cmd) -eq 3; and test $cmd[2] = sftp; and contains -- $cmd[3] open ls get put
+end
+
 complete -c shbx -n '__shbx_needs_command' -a '(shbx __complete commands -- (commandline -ct))'
 complete -c shbx -n '__shbx_using_command connect; or __shbx_using_command show; or __shbx_using_command edit; or __shbx_using_command remove' -a '(shbx __complete hosts -- (commandline -ct))'
+complete -c shbx -n '__shbx_sftp_needs_first_arg' -a 'open ls get put'
+complete -c shbx -n '__shbx_sftp_needs_first_arg; or __shbx_sftp_uses_host_subcommand' -a '(shbx __complete hosts -- (commandline -ct))'
 complete -c shbx -n '__shbx_tunnel_needs_subcommand' -a 'add list show start stop remove'
 complete -c shbx -n '__shbx_tunnel_uses_name_command' -a '(shbx __complete tunnels -- (commandline -ct))'
 complete -c shbx -n '__shbx_using_command group' -a 'add list show remove rename'
 complete -c shbx -n '__shbx_using_command completion' -a 'bash zsh fish'
 complete -c shbx -n '__shbx_using_command export' -a 'ssh-config'
 `
+
+func loadNamedHost(name string) (config.Host, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.Host{}, err
+	}
+	host, ok := cfg.Hosts[name]
+	if !ok {
+		return config.Host{}, fmt.Errorf("host %q not found", name)
+	}
+	return host, nil
+}
+
+func parseDryRunArgs(args []string) ([]string, bool, error) {
+	positional := make([]string, 0, len(args))
+	dryRun := false
+	passthrough := false
+
+	for _, arg := range args {
+		if passthrough {
+			positional = append(positional, arg)
+			continue
+		}
+		switch arg {
+		case "--":
+			passthrough = true
+		case "--dry-run", "--print":
+			dryRun = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return nil, false, fmt.Errorf("unknown option %q", arg)
+			}
+			positional = append(positional, arg)
+		}
+	}
+	return positional, dryRun, nil
+}
 
 func buildSSHArgs(host config.Host) []string {
 	port := host.Port
@@ -2055,6 +2237,20 @@ func buildSSHArgs(host config.Host) []string {
 	}
 
 	return append(args, formatSSHTarget(host))
+}
+
+func buildSFTPArgs(host config.Host, remotePath string) []string {
+	port := host.Port
+	if port == 0 {
+		port = defaultSSHPort
+	}
+
+	args := []string{"-P", strconv.Itoa(port)}
+	if host.IdentityFile != "" {
+		args = append(args, "-i", host.IdentityFile)
+	}
+
+	return append(args, formatSFTPTarget(host, remotePath))
 }
 
 func buildTunnelSSHArgs(host config.Host, tunnel config.Tunnel) []string {
@@ -2146,6 +2342,59 @@ func validatePort(label string, port int) error {
 	return nil
 }
 
+func sftpUsageOperands(operation string) string {
+	switch operation {
+	case "ls":
+		return "<host> [remote-path]"
+	case "get":
+		return "<host> <remote-path> [local-path]"
+	case "put":
+		return "<host> <local-path> [remote-path]"
+	default:
+		return "<host> [paths...]"
+	}
+}
+
+func validateSFTPBatchOperands(operation string, positional []string) error {
+	switch operation {
+	case "ls":
+		if len(positional) < 1 || len(positional) > 2 {
+			return errors.New("expected <host> [remote-path]")
+		}
+	case "get", "put":
+		if len(positional) < 2 || len(positional) > 3 {
+			if operation == "get" {
+				return errors.New("expected <host> <remote-path> [local-path]")
+			}
+			return errors.New("expected <host> <local-path> [remote-path]")
+		}
+	default:
+		return fmt.Errorf("unknown sftp operation %q", operation)
+	}
+	return nil
+}
+
+func buildSFTPBatch(operation string, operands []string) (string, error) {
+	parts := []string{operation}
+	for _, operand := range operands {
+		if strings.ContainsAny(operand, "\r\n") {
+			return "", errors.New("SFTP paths cannot contain newlines")
+		}
+		if operand != "" {
+			parts = append(parts, sftpBatchQuote(operand))
+		}
+	}
+	return strings.Join(parts, " ") + "\n", nil
+}
+
+func sftpBatchQuote(value string) string {
+	if value == "" {
+		return `""`
+	}
+	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return `"` + replacer.Replace(value) + `"`
+}
+
 func startTunnelProcess(name string, host config.Host, tunnel config.Tunnel, allowPrompt bool) (pid int, err error) {
 	defer func() {
 		if err != nil {
@@ -2225,6 +2474,44 @@ func runSSHAndWait(sshArgs []string, allowPrompt bool) error {
 	return nil
 }
 
+func runSFTPProcess(host config.Host, sftpArgs []string, batch string) error {
+	args := sftpArgs
+	batchPath := ""
+	if batch != "" {
+		file, err := os.CreateTemp("", "shbx-sftp-*.batch")
+		if err != nil {
+			return fmt.Errorf("create SFTP batch: %w", err)
+		}
+		batchPath = file.Name()
+		defer os.Remove(batchPath)
+		if _, err := file.WriteString(batch); err != nil {
+			_ = file.Close()
+			return fmt.Errorf("write SFTP batch: %w", err)
+		}
+		if err := file.Close(); err != nil {
+			return fmt.Errorf("close SFTP batch: %w", err)
+		}
+		args = append([]string{"-b", batchPath}, sftpArgs...)
+	}
+
+	if host.Password != "" {
+		if batch != "" {
+			return runSFTPBatchWithPassword(host.Password, args)
+		}
+		return runSFTPWithPassword(host.Password, args)
+	}
+
+	cmd := exec.Command(sftpBinary(), args...)
+	if batch == "" {
+		cmd.Stdin = os.Stdin
+	} else {
+		cmd.Stdin = nil
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func sshRunError(err error, output string) error {
 	output = strings.TrimSpace(output)
 	if output == "" {
@@ -2276,6 +2563,14 @@ func formatSSHTarget(host config.Host) string {
 	target := host.Host
 	if host.User != "" {
 		target = host.User + "@" + host.Host
+	}
+	return target
+}
+
+func formatSFTPTarget(host config.Host, remotePath string) string {
+	target := formatSSHTarget(host)
+	if remotePath != "" {
+		target += ":" + remotePath
 	}
 	return target
 }
@@ -2501,6 +2796,22 @@ func connectCommandString(host config.Host, sshArgs []string) string {
 	return shellCommandString("ssh", sshArgs) + " # password: set"
 }
 
+func sftpCommandString(host config.Host, sftpArgs []string) string {
+	if host.Password == "" {
+		return shellCommandString("sftp", sftpArgs)
+	}
+	return shellCommandString("sftp", sftpArgs) + " # password: set"
+}
+
+func sftpBatchCommandString(host config.Host, sftpArgs []string, batch string) string {
+	args := append([]string{"-b", "-"}, sftpArgs...)
+	command := shellCommandString("printf", []string{"%s", batch}) + " | " + shellCommandString("sftp", args)
+	if host.Password != "" {
+		command += " # password: set"
+	}
+	return command
+}
+
 func tunnelCommandString(host config.Host, sshArgs []string) string {
 	return connectCommandString(host, sshArgs)
 }
@@ -2512,6 +2823,13 @@ func sshBinary() string {
 	return "ssh"
 }
 
+func sftpBinary() string {
+	if value := strings.TrimSpace(os.Getenv("SHBX_SFTP_BIN")); value != "" {
+		return value
+	}
+	return "sftp"
+}
+
 func runSSHWithPassword(password string, sshArgs []string) error {
 	stdin, ok := terminalFile(os.Stdin)
 	if !ok {
@@ -2519,6 +2837,61 @@ func runSSHWithPassword(password string, sshArgs []string) error {
 	}
 
 	cmd := exec.Command(sshBinary(), sshArgs...)
+	ptmx, err := startSSHPTY(cmd, stdin)
+	if err != nil {
+		return err
+	}
+	defer ptmx.Close()
+
+	resizeSignals := make(chan os.Signal, 1)
+	signal.Notify(resizeSignals, syscall.SIGWINCH)
+	defer func() {
+		signal.Stop(resizeSignals)
+		close(resizeSignals)
+	}()
+	go func() {
+		for range resizeSignals {
+			_ = pty.InheritSize(stdin, ptmx)
+		}
+	}()
+	resizeSignals <- syscall.SIGWINCH
+
+	oldState, err := term.MakeRaw(int(stdin.Fd()))
+	if err != nil {
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("set terminal raw mode: %w", err)
+	}
+	defer term.Restore(int(stdin.Fd()), oldState)
+
+	go func() {
+		_, _ = io.Copy(ptmx, stdin)
+	}()
+
+	outputDone := make(chan error, 1)
+	go func() {
+		outputDone <- copySSHOutputAndInjectPassword(os.Stdout, ptmx, password)
+	}()
+
+	waitErr := cmd.Wait()
+	_ = ptmx.Close()
+
+	outputErr := <-outputDone
+	if waitErr != nil {
+		return sshRunError(waitErr, "")
+	}
+	if outputErr != nil && !errors.Is(outputErr, os.ErrClosed) {
+		return outputErr
+	}
+	return nil
+}
+
+func runSFTPWithPassword(password string, sftpArgs []string) error {
+	stdin, ok := terminalFile(os.Stdin)
+	if !ok {
+		return errors.New("password auto-login requires an interactive terminal")
+	}
+
+	cmd := exec.Command(sftpBinary(), sftpArgs...)
 	ptmx, err := startSSHPTY(cmd, stdin)
 	if err != nil {
 		return err
@@ -2578,6 +2951,32 @@ func runSSHWithStoredPassword(password string, sshArgs []string) error {
 	outputDone := make(chan error, 1)
 	go func() {
 		outputDone <- copySSHOutputAndInjectPassword(&output, ptmx, password)
+	}()
+
+	waitErr := cmd.Wait()
+	_ = ptmx.Close()
+
+	outputErr := <-outputDone
+	if waitErr != nil {
+		return sshRunError(waitErr, output.String())
+	}
+	if outputErr != nil && !errors.Is(outputErr, os.ErrClosed) {
+		return outputErr
+	}
+	return nil
+}
+
+func runSFTPBatchWithPassword(password string, sftpArgs []string) error {
+	cmd := exec.Command(sftpBinary(), sftpArgs...)
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		return err
+	}
+
+	var output bytes.Buffer
+	outputDone := make(chan error, 1)
+	go func() {
+		outputDone <- copySSHOutputAndInjectPassword(io.MultiWriter(os.Stdout, &output), ptmx, password)
 	}()
 
 	waitErr := cmd.Wait()

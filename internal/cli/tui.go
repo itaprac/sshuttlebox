@@ -78,6 +78,8 @@ type tuiPaletteAction int
 const (
 	tuiPaletteConnect tuiPaletteAction = iota
 	tuiPalettePreview
+	tuiPaletteSFTP
+	tuiPaletteSFTPPreview
 	tuiPaletteAddHost
 	tuiPaletteAddTunnel
 	tuiPaletteEdit
@@ -107,6 +109,7 @@ type tuiModel struct {
 	status       string
 	err          error
 	connectName  string
+	sftpName     string
 	tunnelName   string
 	outputTitle  string
 	showDetails  bool
@@ -136,6 +139,7 @@ type tuiKeyMap struct {
 	Up        key.Binding
 	Down      key.Binding
 	Connect   key.Binding
+	SFTP      key.Binding
 	Preview   key.Binding
 	Add       key.Binding
 	Edit      key.Binding
@@ -158,6 +162,7 @@ func newTUIKeyMap() tuiKeyMap {
 		Up:        key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("up/k", "up")),
 		Down:      key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("down/j", "down")),
 		Connect:   key.NewBinding(key.WithKeys("enter", "c"), key.WithHelp("enter/c", "connect")),
+		SFTP:      key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sftp")),
 		Preview:   key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "print")),
 		Add:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
 		Edit:      key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
@@ -177,12 +182,12 @@ func newTUIKeyMap() tuiKeyMap {
 }
 
 func (k tuiKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Connect, k.Preview, k.Add, k.Edit, k.Remove, k.Switch, k.Filter, k.Details, k.Palette, k.Help, k.Quit}
+	return []key.Binding{k.Connect, k.SFTP, k.Preview, k.Add, k.Edit, k.Remove, k.Switch, k.Filter, k.Details, k.Palette, k.Help, k.Quit}
 }
 
 func (k tuiKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Connect, k.Preview},
+		{k.Up, k.Down, k.Connect, k.SFTP, k.Preview},
 		{k.Add, k.Edit, k.Remove, k.Switch, k.Filter, k.Details, k.Palette},
 		{k.ReuseKey, k.PickHost, k.PickGroup, k.Save, k.Cancel, k.Help, k.Quit},
 	}
@@ -219,6 +224,9 @@ func (a App) runUI(args []string) error {
 		}
 		if tui.connectName != "" {
 			return a.runConnect([]string{tui.connectName})
+		}
+		if tui.sftpName != "" {
+			return a.runSFTP([]string{tui.sftpName})
 		}
 		if tui.tunnelName == "" {
 			return nil
@@ -396,6 +404,8 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.connectName = item.name
 		return m, tea.Quit
+	case key.Matches(msg, m.keys.SFTP):
+		return m.runSelectedSFTP()
 	case key.Matches(msg, m.keys.Preview):
 		if m.mode == tuiModeTunnels {
 			item, ok := m.selectedTunnelItem()
@@ -1224,6 +1234,7 @@ func (m tuiModel) detailsView(width int) string {
 		labelValue("Password", passwordStatus(item.host)),
 		"",
 		mutedStyle.Render(wrapText(connectCommandString(item.host, buildSSHArgs(item.host)), width)),
+		mutedStyle.Render(wrapText(sftpCommandString(item.host, buildSFTPArgs(item.host, "")), width)),
 	}
 	return strings.Join(rows, "\n")
 }
@@ -1711,6 +1722,61 @@ func (m tuiModel) runSelectedConnect() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
+func (m tuiModel) runSelectedSFTP() (tea.Model, tea.Cmd) {
+	name, _, ok, err := m.selectedSFTPHost()
+	if err != nil {
+		m.screen = tuiScreenMain
+		m.setError(err)
+		return m, nil
+	}
+	if !ok {
+		m.screen = tuiScreenMain
+		m.setError(errors.New("no host selected"))
+		return m, nil
+	}
+	m.sftpName = name
+	return m, tea.Quit
+}
+
+func (m tuiModel) runSelectedSFTPPreview() (tea.Model, tea.Cmd) {
+	_, host, ok, err := m.selectedSFTPHost()
+	if err != nil {
+		m.screen = tuiScreenMain
+		m.setError(err)
+		return m, nil
+	}
+	if !ok {
+		m.screen = tuiScreenMain
+		m.setError(errors.New("no host selected"))
+		return m, nil
+	}
+	m.status = sftpCommandString(host, buildSFTPArgs(host, ""))
+	m.outputTitle = "SFTP command"
+	m.err = nil
+	m.screen = tuiScreenPreview
+	return m, nil
+}
+
+func (m tuiModel) selectedSFTPHost() (string, config.Host, bool, error) {
+	if m.mode == tuiModeTunnels {
+		item, ok := m.selectedTunnelItem()
+		if !ok {
+			return "", config.Host{}, false, nil
+		}
+		host, ok := m.cfg.Hosts[item.tunnel.Host]
+		if !ok {
+			return "", config.Host{}, false, fmt.Errorf("host %q for tunnel %q not found", item.tunnel.Host, item.name)
+		}
+		return item.tunnel.Host, host, true, nil
+	}
+
+	item, ok := m.selectedItem()
+	if !ok {
+		return "", config.Host{}, false, nil
+	}
+	return item.name, item.host, true, nil
+}
+
 func (m tuiModel) runSelectedPreview() (tea.Model, tea.Cmd) {
 	if m.mode == tuiModeTunnels {
 		item, ok := m.selectedTunnelItem()
@@ -1767,7 +1833,9 @@ func (m tuiModel) paletteItems() []tuiPaletteItem {
 		if item, ok := m.selectedTunnelItem(); ok {
 			items = append(items,
 				tuiPaletteItem{title: "Start/stop tunnel", hint: item.name, action: tuiPaletteConnect},
+				tuiPaletteItem{title: "Open host SFTP", hint: item.tunnel.Host, action: tuiPaletteSFTP},
 				tuiPaletteItem{title: "Print tunnel command", hint: item.name, action: tuiPalettePreview},
+				tuiPaletteItem{title: "Print host SFTP command", hint: item.tunnel.Host, action: tuiPaletteSFTPPreview},
 				tuiPaletteItem{title: "Edit tunnel", hint: item.name, action: tuiPaletteEdit},
 				tuiPaletteItem{title: "Remove tunnel", hint: item.name, action: tuiPaletteRemove},
 			)
@@ -1785,7 +1853,9 @@ func (m tuiModel) paletteItems() []tuiPaletteItem {
 	if item, ok := m.selectedItem(); ok {
 		items = append(items,
 			tuiPaletteItem{title: "Connect host", hint: item.name, action: tuiPaletteConnect},
+			tuiPaletteItem{title: "Open SFTP", hint: item.name, action: tuiPaletteSFTP},
 			tuiPaletteItem{title: "Print SSH command", hint: item.name, action: tuiPalettePreview},
+			tuiPaletteItem{title: "Print SFTP command", hint: item.name, action: tuiPaletteSFTPPreview},
 			tuiPaletteItem{title: "Edit host", hint: item.name, action: tuiPaletteEdit},
 			tuiPaletteItem{title: "Remove host", hint: item.name, action: tuiPaletteRemove},
 		)
@@ -1807,6 +1877,10 @@ func (m tuiModel) runPaletteAction(action tuiPaletteAction) (tea.Model, tea.Cmd)
 		return m.runSelectedConnect()
 	case tuiPalettePreview:
 		return m.runSelectedPreview()
+	case tuiPaletteSFTP:
+		return m.runSelectedSFTP()
+	case tuiPaletteSFTPPreview:
+		return m.runSelectedSFTPPreview()
 	case tuiPaletteAddHost:
 		return m.openForm("", config.Host{})
 	case tuiPaletteAddTunnel:
