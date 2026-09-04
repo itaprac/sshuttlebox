@@ -1,0 +1,43 @@
+/* Website layout and static TUI preview. */
+.site{--ink:var(--text);--soft:var(--panel-2);--rule:var(--border);--link:var(--accent)}
+
+
+
+.site-skip{position:absolute;left:20px;top:-100px;padding:10px 16px;background:var(--panel);color:var(--text);z-index:20}
+.site-skip:focus{top:5px}
+.site .wrap{max-width:1188px;padding-top:25px}
+.site header.nav{margin-bottom:42px}
+.site .hero-top{gap:40px;margin-bottom:38px}
+.site .hero{margin-top:35px;margin-bottom:60px}
+.site .lede{font-size:17px}
+.site-tui-layout{display:grid;grid-template-columns:max-content minmax(0,1fr);align-items:center;gap:36px;border-top:1px solid var(--border);padding-top:29px}
+.site-tui-intro{min-width:0}
+.site-tui-intro h2{font-size:23px;line-height:1.3;font-weight:500;letter-spacing:-.02em;margin:0 0 9px}
+.site-tui-intro p{font-size:14px;color:var(--text-soft);line-height:1.7;margin:0;max-width:710px}
+.site-tui-intro code{font-family:var(--mono);color:var(--accent)}
+.site .section-title h2,.site .command-group h3{text-transform:none;letter-spacing:0;font-size:14px;color:var(--text-soft)}
+.site .install code{white-space:normal;overflow-wrap:anywhere;font-size:12px;text-overflow:clip;align-self:center}
+.site .install .copied-flash{right:8px}
+.site a:focus-visible,.site button:focus-visible,.site select:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+
+.static-tui{margin:0;min-width:0;scroll-margin-top:24px}
+.static-tui .terminal{width:fit-content;max-width:100%;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;overflow:hidden;box-shadow:var(--shadow)}
+.static-tui .terminal-title{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 17px;background:var(--bg-2);border-bottom:1px solid var(--border);font:11px var(--mono);color:var(--text-soft)}
+.static-tui .terminal-title span:last-child{color:var(--muted);font-size:10px}
+.static-tui .terminal-screen{padding:10px 12px;overflow:auto;scrollbar-color:var(--border) var(--panel)}
+.static-tui .terminal-output{font:12px/18px 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;white-space:pre;letter-spacing:0;font-variant-ligatures:none;font-synthesis:none;width:110ch;margin:0;tab-size:4}
+.static-tui .terminal-compact{display:none}
+.static-tui .tui-accent,.static-tui .tui-label{color:var(--accent)}
+.static-tui .tui-selected-text{color:var(--text)}
+.static-tui .tui-muted{color:var(--muted)}
+.static-tui .tui-rule{color:var(--border)}
+.static-tui .tui-selected{background:rgba(110,231,183,.08)}
+.static-tui .tui-bold{font-weight:700}
+.static-tui figcaption{font-size:11px;color:var(--muted);margin-top:10px}
+@media(max-width:980px){.static-tui .terminal-wide{display:none}.static-tui .terminal-compact{display:block;width:48ch;font-size:12px;line-height:18px}}
+@media(max-width:640px){.static-tui .terminal-screen{padding:10px 9px}.static-tui .terminal-compact{font-size:10px;line-height:16px}.static-tui .terminal-title{padding:11px 12px;font-size:10px}.static-tui .terminal-title span:last-child{font-size:8px}.static-tui figcaption{font-size:10px}}
+@media(max-width:370px){.static-tui .terminal-compact{font-size:9px;line-height:15px}.static-tui .terminal-screen{padding:8px 6px}}
+@media(max-width:880px){.site .hero-top{grid-template-columns:1fr;margin-bottom:28px}.site header.nav{margin-bottom:30px}.site .hero{margin-top:25px}.site-tui-intro{gap:20px}.site .term-cli{max-width:100%}.site .term-cli .line{white-space:normal;overflow-wrap:anywhere}}
+@media(max-width:640px){.site .wrap{padding:22px 16px 45px}.site header.nav{margin-bottom:25px}.site .lede{font-size:15px}.site h1{font-size:32px}.site-tui-layout{padding-top:25px}.site-tui-intro h2{font-size:21px}.site-tui-intro p{font-size:13px}.site .hero{margin-bottom:40px}.site .section-title{margin-bottom:23px}.site .brand{font-size:13px}.site .nav-links{gap:10px}.site .install code{font-size:10px;padding-inline:10px}.site .install .prompt{padding-inline:10px}}
+
+@media(max-width:1159px){.site-tui-layout{grid-template-columns:minmax(0,1fr);gap:22px}.site-tui-intro{grid-row:1}.static-tui .terminal-wide{font-size:13px;line-height:19px}}

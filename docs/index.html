@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="sshuttlebox is a small SSH host, SFTP, and tunnel manager for your terminal." />
     <meta name="color-scheme" content="dark" />
-    <title>sshuttlebox — SSH hosts and tunnels, kept tidy</title>
+    <title>sshuttlebox · SSH hosts and tunnels, kept tidy</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -304,8 +304,8 @@
         font-size: 12px;
         font-weight: 500;
         color: var(--accent);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
+        text-transform: none;
+        letter-spacing: 0;
         margin: 0 0 14px;
       }
 
@@ -452,8 +452,8 @@
 
       .tui-section {
         font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
+        text-transform: none;
+        letter-spacing: 0;
         color: var(--dim);
         padding: 6px 14px 4px;
       }
@@ -496,8 +496,8 @@
         font-size: 12px;
         font-weight: 500;
         color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
+        text-transform: none;
+        letter-spacing: 0;
       }
 
       .tui-detail {
@@ -577,8 +577,8 @@
         font-family: var(--mono);
         font-weight: 500;
         color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: 0.12em;
+        text-transform: none;
+        letter-spacing: 0;
         margin: 0;
       }
 
@@ -644,7 +644,7 @@
         font-size: 11px;
         font-weight: 500;
         color: var(--muted);
-        text-transform: uppercase;
+        text-transform: none;
         letter-spacing: 0.1em;
         margin: 0 0 14px;
       }
@@ -841,8 +841,10 @@
         }
       }
     </style>
+    <link rel="stylesheet" href="assets/site.css?v=0a34c49d3ad1" />
   </head>
-  <body>
+  <body class="site">
+    <a class="site-skip" href="#main">Skip to content</a>
     <div class="wrap">
       <header class="nav">
         <div class="brand">
@@ -871,6 +873,7 @@
         </nav>
       </header>
 
+      <main id="main">
       <section class="hero">
         <div class="hero-top">
           <div class="hero-text">
@@ -881,7 +884,7 @@
             <p class="lede">
               A compact terminal manager for the SSH targets you actually use. Save hosts under short
               names, open SFTP sessions, move files, run local/remote/SOCKS tunnels, and connect with
-              one command — or browse everything from an interactive TUI.
+              one command, or browse everything from an interactive TUI.
             </p>
 
             <button type="button" class="install" id="install" aria-label="Copy install command">
@@ -898,94 +901,88 @@
                 <span class="light y"></span>
                 <span class="light g"></span>
               </div>
-              <div class="title">zsh — shbx</div>
+              <div class="title">zsh · shbx</div>
             </div>
             <div class="term-body">
               <span class="line"><span class="prompt">❯</span>shbx config init</span>
               <span class="line"><span class="ok">✓</span>Created config: <span class="dim">~/.config/sshuttlebox/config.json</span></span>
               <span class="line"><span class="prompt">❯</span>shbx add <span class="arg">prod</span> <span class="flag">--host</span> 192.0.2.10 <span class="flag">--user</span> deploy</span>
               <span class="line"><span class="ok">✓</span>Host <span class="str">"prod"</span> saved</span>
-              <span class="line"><span class="prompt">❯</span>shbx connect <span class="arg">prod</span></span>
-              <span class="line"><span class="dim">Welcome to Ubuntu 22.04.3 LTS</span></span>
+              <span class="line"><span class="prompt">❯</span>shbx connect <span class="arg">prod</span> <span class="flag">--dry-run</span></span>
+              <span class="line"><span class="dim">ssh -p 22 deploy@192.0.2.10</span></span>
               <span class="line"><span class="prompt">❯</span>shbx sftp ls <span class="arg">prod</span> <span class="str">/var/www</span></span>
               <span class="line"><span class="dim">drwxr-xr-x deploy deploy releases</span></span>
-              <span class="line">deploy@prod:~$<span class="cursor"></span></span>
+              <span class="line"><span class="prompt">❯</span><span class="cursor"></span></span>
             </div>
           </div>
         </div>
 
-        <div class="tui-block">
-        <div class="term term-tui" aria-label="shbx terminal UI preview">
-          <div class="term-bar">
-            <div class="lights" aria-hidden="true">
-              <span class="light r"></span>
-              <span class="light y"></span>
-              <span class="light g"></span>
-            </div>
-            <div class="title">shbx — interactive ui</div>
-          </div>
-          <div class="term-body">
-            <div class="tui" aria-hidden="true">
-              <div class="tui-side">
-                <div class="tui-section">Hosts · work</div>
-                <div class="tui-row active">
-                  <span>prod</span><span class="badge">deploy@</span>
-                </div>
-                <div class="tui-row">
-                  <span>staging</span><span class="badge">deploy@</span>
-                </div>
-                <div class="tui-row">
-                  <span>jump</span><span class="badge">ec2-user@</span>
-                </div>
-                <div class="tui-section">Tunnels</div>
-                <div class="tui-row">
-                  <span>db</span><span class="on">● up</span>
-                </div>
-                <div class="tui-row">
-                  <span>socks</span><span class="off">○ down</span>
-                </div>
-                <div class="tui-row">
-                  <span>grafana</span><span class="off">○ down</span>
-                </div>
-              </div>
-              <div class="tui-main">
-                <h4>prod</h4>
-                <dl class="tui-detail">
-                  <dt>Host</dt>
-                  <dd><span class="v">192.0.2.10</span></dd>
-                  <dt>User</dt>
-                  <dd>deploy</dd>
-                  <dt>Port</dt>
-                  <dd>22</dd>
-                  <dt>Identity</dt>
-                  <dd class="c-muted">~/.ssh/id_ed25519</dd>
-                  <dt>Group</dt>
-                  <dd class="c-magenta">work</dd>
-                  <dt>Tunnels</dt>
-                  <dd><span class="c-green">db</span> <span class="c-dim">·</span> grafana</dd>
-                </dl>
-              </div>
-            </div>
-            <div class="tui-status" aria-hidden="true">
-              <div class="keys">
-                <span><b>↵</b> connect</span>
-                <span><b>s</b> sftp</span>
-                <span><b>e</b> edit</span>
-                <span><b>:</b> palette</span>
-              </div>
-              <div>7 hosts · 3 tunnels · 1 running</div>
-            </div>
-          </div>
-        </div>
+        <div class="site-tui-layout">
+<figure id="try" class="static-tui" aria-label="sshuttlebox terminal interface with sample hosts and tunnels">
+          <div class="terminal">
+            <div class="terminal-title"><span>shbx · Terminal UI</span><span>Sample configuration</span></div>
+            <div class="terminal-screen">
+              <pre class="terminal-output terminal-wide"><span class="tui-rule">┌────────────────────────────────────────────────────────────────────────────────────────────────────────────┐</span>
+<span class="tui-rule">│</span><span class="tui-accent tui-bold">▣</span>  <span class="tui-accent tui-bold">sshuttlebox</span>  <span class="tui-muted">v0.3.4</span><span class="tui-rule"> · </span><span class="tui-muted">3 hosts  ·  2 tunnels</span>                         <span class="tui-muted">SSH hosts &amp; tunnels, in your terminal</span><span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-rule">────────────────────────────────────────────────────────────────────────────────────────────────────────────</span><span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-accent tui-bold">HOSTS 3                             </span> <span class="tui-rule">│</span> <span class="tui-label tui-bold">DETAILS                                                              </span><span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-label tui-bold">work</span>                                 <span class="tui-rule">│</span> <span class="tui-accent tui-bold">prod</span>                                                                 <span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-selected-text tui-selected">&gt; prod  </span><span class="tui-selected-text tui-selected">deploy@192.0.2.10:22</span>         <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>  staging  <span class="tui-muted">deploy@198.51.100.5:2222</span>  <span class="tui-rule">│</span> <span class="tui-label">Host: </span>192.0.2.10                                                     <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span> <span class="tui-label">User: </span>deploy                                                         <span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-label tui-bold">ungrouped</span>                            <span class="tui-rule">│</span> <span class="tui-label">Port: </span>22                                                             <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>  lab  <span class="tui-muted">dev@203.0.113.20:22</span>           <span class="tui-rule">│</span> <span class="tui-label">Identity file: </span>/home/demo/.ssh/id_ed25519                            <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span> <span class="tui-label">OpenSSH config: </span>-                                                    <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span> <span class="tui-label">Group: </span>work                                                          <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span> <span class="tui-label">Password: </span>-                                                          <span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-rule">────────────────────────────────────</span> <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-label tui-bold">TUNNELS 2                           </span> <span class="tui-rule">│</span> <span class="tui-muted">ssh -p 22 -i /home/demo/.ssh/id_ed25519 deploy@192.0.2.10</span>            <span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-label tui-bold">work</span>                                 <span class="tui-rule">│</span> <span class="tui-muted">sftp -P 22 -i /home/demo/.ssh/id_ed25519 deploy@192.0.2.10</span>           <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>  db  <span class="tui-muted">○ stopped</span>  127.0.0.1:5432 -... <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>  socks  <span class="tui-muted">○ stopped</span>  SOCKS 127.0.0... <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
+<span class="tui-rule">└────────────────────────────────────────────────────────────────────────────────────────────────────────────┘</span>
 
-        <div class="tui-copy">
-          <h3>Interactive UI</h3>
-          <h2>Everything you need,<br />without leaving the terminal.</h2>
-          <p>
-            Run <code style="font-family:var(--mono);color:var(--accent)">shbx</code> with no
-            arguments to launch the TUI. Browse hosts, open SFTP, start tunnels, and connect — all
-            from a single screen, with a command palette for any action.
-          </p>
+<span class="tui-muted">Ready.</span>
+<span class="tui-muted">enter/c</span> <span class="tui-muted">connect</span><span class="tui-muted"> • </span><span class="tui-muted">s</span> <span class="tui-muted">sftp</span><span class="tui-muted"> • </span><span class="tui-muted">p</span> <span class="tui-muted">print</span><span class="tui-muted"> • </span><span class="tui-muted">a</span> <span class="tui-muted">add</span><span class="tui-muted"> • </span><span class="tui-muted">e</span> <span class="tui-muted">edit</span><span class="tui-muted"> • </span><span class="tui-muted">r</span> <span class="tui-muted">remove</span><span class="tui-muted"> • </span><span class="tui-muted">tab</span> <span class="tui-muted">hosts/tunnels</span><span class="tui-muted"> • </span><span class="tui-muted">/</span> <span class="tui-muted">filter</span><span class="tui-muted"> • </span><span class="tui-muted">d</span> <span class="tui-muted">details</span> <span class="tui-muted">…</span>   </pre>
+              <pre class="terminal-output terminal-compact"><span class="tui-rule">┌──────────────────────────────────────────────┐</span>
+<span class="tui-rule">│</span><span class="tui-accent tui-bold">▣</span>  <span class="tui-accent tui-bold">sshuttlebox</span><span class="tui-rule"> · </span><span class="tui-muted">3 hosts  ·  2 tunnels</span>        <span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-rule">──────────────────────────────────────────────</span><span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-accent tui-bold">HOSTS 3                                       </span><span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-label tui-bold">work</span>                                          <span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-selected-text tui-selected">&gt; prod  </span><span class="tui-selected-text tui-selected">deploy@192.0.2.10:22</span>                  <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>  staging  <span class="tui-muted">deploy@198.51.100.5:2222</span>           <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span><span class="tui-label tui-bold">ungrouped</span>                                     <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>  lab  <span class="tui-muted">dev@203.0.113.20:22</span>                    <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
+<span class="tui-rule">└──────────────────────────────────────────────┘</span>
+
+<span class="tui-muted">Ready.</span>
+<span class="tui-muted">enter/c</span> <span class="tui-muted">connect</span><span class="tui-muted"> • </span><span class="tui-muted">s</span> <span class="tui-muted">sftp</span><span class="tui-muted"> • </span><span class="tui-muted">p</span> <span class="tui-muted">print</span><span class="tui-muted"> • </span><span class="tui-muted">a</span> <span class="tui-muted">add</span> <span class="tui-muted">…</span>    </pre>
+            </div>
+          </div>
+          <figcaption>The TUI with example hosts and tunnels.</figcaption>
+        </figure>
+<div class="site-tui-intro">
+          <div>
+            <h2>Your hosts, in one terminal.</h2>
+            <p>Run <code>shbx</code> to browse hosts and tunnels. Select a host, print its SSH command, or find an action in the command palette.</p>
+          </div>
         </div>
         </div>
       </section>
@@ -1175,6 +1172,7 @@
         </div>
       </section>
 
+      </main>
       <footer>
         <span>
           MIT licensed ·
