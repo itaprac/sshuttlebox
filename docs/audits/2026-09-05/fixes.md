@@ -41,7 +41,7 @@ Wprowadzono poprawki do wszystkich 12 potwierdzonych problemów z [audytu](/User
 - `go vet ./...`: wynik pozytywny.
 - `git diff --check`: wynik pozytywny.
 - `GOTOOLCHAIN=go1.22.12 go test -race -ldflags=-linkmode=external ./...`: wynik pozytywny. Na bieżącym macOS wewnętrzny linker Go 1.22 tworzy plik odrzucany przez loader z powodu braku LC_UUID. Wariant CI dla Go 1.22 na macOS stosuje zewnętrzny linker. Zewnętrzny linker emituje ostrzeżenia LC_DYSYMTAB, ale testy kończą się sukcesem.
-- `GOOS=linux GOARCH=amd64 go build ... ./cmd/shbx`: wynik pozytywny. Testów Linuxa nie wykonano lokalnie; dodano je do CI. Workflow nie został jeszcze uruchomiony na GitHubie.
+- `GOOS=linux GOARCH=amd64 go build ... ./cmd/shbx`: wynik pozytywny. Testy Go 1.22 i stable na macOS i Linuxie, skan podatności oraz integracja SSH/SFTP przeszły również w [CI dla commita 85c821a](https://github.com/itaprac/sshuttlebox/actions/runs/33927874754).
 - `govulncheck`: zero podatności osiągalnych przez kod i zero w importowanych pakietach. Skan wykazał jedną podatność wyłącznie w nieużywanym module dla Windows, GO-2026-5024 w `golang.org/x/sys/windows`. Projekt wspiera macOS i Linux. Nie podniesiono minimalnej wersji Go tylko z powodu nieużywanej ścieżki Windows.
 - Rzeczywisty OpenSSH i lokalny Paramiko 5.0.0: `ls`, `get`, `put`, keyboard-interactive z hasłem, błędne hasło i nieznany klucz serwera. Wszystkie sześć przypadków przeszło. Poprawne transfery sprawdzały zawartość plików; błędne hasło kończyło się po jednej próbie, nieznany klucz przed wysłaniem hasła. Test zapisano w `tests/integration/ssh_password.py` i dodano do CI.
 - Rzeczywisty PTY 80x15: otwarcie formularza, wpisanie `q`, zapis nowego hosta i wyjście z ekranu głównego zakończyły się poprawnie.
