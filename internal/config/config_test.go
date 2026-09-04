@@ -122,6 +122,7 @@ func TestSaveAndLoadTunnels(t *testing.T) {
 	}
 
 	cfg := Default()
+	cfg.Hosts["prod"] = Host{Host: "prod.example"}
 	cfg.Tunnels["db"] = Tunnel{
 		Host:       "prod",
 		Type:       "local",
@@ -156,7 +157,7 @@ func TestLoadMissingConfigReturnsHelpfulError(t *testing.T) {
 	}
 }
 
-func TestExportBackupRestorePreserveBytesAndMode(t *testing.T) {
+func TestExportBackupRestorePreserveBytesAndUsePrivateMode(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	path, _, err := Init()
@@ -175,13 +176,13 @@ func TestExportBackupRestorePreserveBytesAndMode(t *testing.T) {
 	if err := Export(exportPath); err != nil {
 		t.Fatalf("Export: %v", err)
 	}
-	assertFileBytesAndMode(t, exportPath, original, 0o640)
+	assertFileBytesAndMode(t, exportPath, original, 0o600)
 
 	backupPath, err := Backup()
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
-	assertFileBytesAndMode(t, backupPath, original, 0o640)
+	assertFileBytesAndMode(t, backupPath, original, 0o600)
 
 	restoreData := []byte("{\"version\":1,\"hosts\":{\"prod\":{\"host\":\"prod.example\"}},\"tunnels\":{}}\n")
 	restorePath := filepath.Join(t.TempDir(), "restore.json")
@@ -193,8 +194,8 @@ func TestExportBackupRestorePreserveBytesAndMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
-	assertFileBytesAndMode(t, restoreBackupPath, original, 0o640)
-	assertFileBytesAndMode(t, path, restoreData, 0o640)
+	assertFileBytesAndMode(t, restoreBackupPath, original, 0o600)
+	assertFileBytesAndMode(t, path, restoreData, 0o600)
 }
 
 func TestRestoreRejectsInvalidConfig(t *testing.T) {

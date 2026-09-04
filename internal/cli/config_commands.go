@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/itaprac/sshuttlebox/internal/config"
-	"github.com/itaprac/sshuttlebox/internal/tunnelstate"
 )
 
 func (a App) runConfigStatus(args []string) error {
@@ -163,14 +162,16 @@ func configPasswordCount(cfg config.Config) int {
 }
 
 func tunnelStateCounts() (int, int, error) {
-	state, err := tunnelstate.Load()
+	statuses, err := tunnelStatusSnapshot(nil)
 	if err != nil {
 		return 0, 0, fmt.Errorf("check tunnel state: %w", err)
 	}
-	running := 0
-	stale := 0
-	for _, entry := range state.Tunnels {
-		if tunnelstate.EntryRunning(entry) {
+	running, stale := 0, 0
+	for name, status := range statuses {
+		if status.Err != nil {
+			return 0, 0, fmt.Errorf("tunnel %q status unknown: %w", name, status.Err)
+		}
+		if status.Running {
 			running++
 		} else {
 			stale++

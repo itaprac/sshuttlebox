@@ -1,0 +1,176 @@
+package cli
+
+import (
+ "bytes"
+ "fmt"
+ "io"
+ "os"
+ "path/filepath"
+ "strings"
+ "testing"
+ "time"
+
+ tea "github.com/charmbracelet/bubbletea"
+ "github.com/creack/pty"
+ "github.com/itaprac/sshuttlebox/internal/config"
+ "github.com/itaprac/sshuttlebox/internal/tunnelstate"
+ "golang.org/x/term"
+)
+
+func auditSetup(t *testing.T) (string, config.Config) {
+ t.Helper()
+ home := withTempHome(t)
+ t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+ path, _, err := config.Init(); if err != nil { t.Fatal(err) }
+ cfg := config.Default()
+ cfg.Hosts["prod"] = config.Host{Host:"example.invalid"}
+ cfg.Tunnels["db"] = config.Tunnel{Host:"prod", Type:"local", LocalPort:15432, RemoteHost:"localhost", RemotePort:5432}
+ if err := config.Save(path,cfg); err != nil {t.Fatal(err)}
+ return path,cfg
+}
+
+func TestAuditStaleTUIOverwritesCLIChanges(t *testing.T) {
+ _,_ = auditSetup(t)
+ m := newTUIModel()
+ a := App{in:strings.NewReader(""),out:io.Discard}
+ if err := a.Run([]string{"add","added-in-other-terminal","--host","other.invalid"});err!=nil {t.Fatal(err)}
+ m = openTUIForm(t,m,"prod",m.cfg.Hosts["prod"])
+ if err := m.saveForm();err!=nil {t.Fatal(err)}
+ cfg,err:=config.Load();if err!=nil {t.Fatal(err)}
+ if _,ok:=cfg.Hosts["added-in-other-terminal"];ok {t.Fatal("bug not reproduced")}
+ t.Log("CONFIRMED: saving the unchanged TUI form removes the host added by CLI")
+}
+
+func TestAuditBrokenConfigCanBeOverwrittenByTUI(t *testing.T) {
+ path,_:=auditSetup(t)
+ if err:=os.WriteFile(path,[]byte("{broken-json"),0600);err!=nil {t.Fatal(err)}
+ m:=newTUIModel();if m.err==nil {t.Fatal("expected parse error")}
+ m=openTUIForm(t,m,"",config.Host{Host:"new.invalid"})
+ m.inputs[tuiFieldName].SetValue("new")
+ if err:=m.saveForm();err!=nil {t.Fatal(err)}
+ cfg,err:=config.Load();if err!=nil {t.Fatal(err)}
+ t.Logf("CONFIRMED: corrupt config was overwritten with version=%d hosts=%d",cfg.Version,len(cfg.Hosts))
+}
+
+func TestAuditRemoveYesLeavesRunningTunnel(t *testing.T) {
+ auditSetup(t)
+ t.Setenv("SHBX_SSH_BIN",fakeSSHExitBinary(t,0))
+ if err:=tunnelstate.Set("db",tunnelstate.NewEntry(99999999,"ssh example.invalid","/tmp/audit-fictional.sock"));err!=nil {t.Fatal(err)}
+ a:=App{in:strings.NewReader(""),out:io.Discard}
+ if err:=a.Run([]string{"tunnel","remove","db","--yes"});err!=nil {t.Fatal(err)}
+ cfg,_:=config.Load();state,_:=tunnelstate.Load()
+ if _,ok:=cfg.Tunnels["db"];ok {t.Fatal("entry not removed")}
+ if _,ok:=state.Tunnels["db"];!ok {t.Fatal("bug not reproduced")}
+ err:=a.Run([]string{"tunnel","stop","db"})
+ t.Logf("CONFIRMED: state remains after --yes; stop now fails: %v",err)
+}
+
+func TestAuditRenameRunningTunnelLosesState(t *testing.T) {
+ path,cfg:=auditSetup(t)
+ t.Setenv("SHBX_SSH_BIN",fakeSSHExitBinary(t,0))
+ if err:=tunnelstate.Set("db",tunnelstate.NewEntry(99999999,"ssh example.invalid","/tmp/audit-fictional.sock"));err!=nil {t.Fatal(err)}
+ m:=newTUIModelWithState(path,cfg,nil)
+ model,_:=m.openTunnelForm("db",cfg.Tunnels["db"]);m=model.(tuiModel)
+ m.inputs[tuiTunnelFieldName].SetValue("renamed-db")
+ if err:=m.saveTunnelForm();err!=nil {t.Fatal(err)}
+ state,_:=tunnelstate.Load()
+ if _,ok:=state.Tunnels["db"];!ok {t.Fatal("bug not reproduced")}
+ if _,ok:=state.Tunnels["renamed-db"];ok {t.Fatal("state was migrated")}
+ t.Log("CONFIRMED: config name is renamed-db while running state and control socket still use db")
+}
+
+func TestAuditRenderProbesInvisibleRows(t *testing.T) {
+ path,cfg:=auditSetup(t)
+ logPath:=filepath.Join(t.TempDir(),"calls")
+ t.Setenv("AUDIT_CALL_LOG",logPath)
+ bin:=filepath.Join(t.TempDir(),"ssh")
+ if err:=os.WriteFile(bin,[]byte("#!/bin/sh\necho check >> \"$AUDIT_CALL_LOG\"\nsleep 0.01\nexit 0\n"),0700);err!=nil {t.Fatal(err)}
+ t.Setenv("SHBX_SSH_BIN",bin)
+ state:=tunnelstate.Default();cfg.Tunnels=map[string]config.Tunnel{}
+ for i:=0;i<40;i++ {name:=fmt.Sprintf("tunnel-%02d",i);cfg.Tunnels[name]=config.Tunnel{Host:"prod",Type:"dynamic",LocalPort:1080+i};state.Tunnels[name]=tunnelstate.NewEntry(99999999,"ssh example.invalid","/tmp/audit-fictional.sock")}
+ if err:=tunnelstate.Save(state);err!=nil {t.Fatal(err)}
+ m:=newTUIModelWithState(path,cfg,nil)
+ start:=time.Now();view:=m.tunnelsPaneView(40,true,8);elapsed:=time.Since(start)
+ data,err:=os.ReadFile(logPath);if err!=nil {t.Fatal(err)}
+ count:=strings.Count(string(data),"check")
+ if count!=40 {t.Fatalf("unexpected checks: %d",count)}
+ t.Logf("CONFIRMED: %d synchronous SSH probes for %d visible lines; %s with 10 ms simulated probe delay",count,len(strings.Split(view,"\n")),elapsed)
+}
+
+func TestAuditSaveDoesNotSecureExistingFile(t *testing.T) {
+ path,cfg:=auditSetup(t)
+ if err:=os.Chmod(path,0644);err!=nil {t.Fatal(err)}
+ cfg.Hosts["prod"]=config.Host{Host:"example.invalid",Password:"dummy-audit-secret"}
+ if err:=config.Save(path,cfg);err!=nil {t.Fatal(err)}
+ info,_:=os.Stat(path)
+ if info.Mode().Perm()!=0644 {t.Fatal("bug not reproduced")}
+ t.Log("CONFIRMED: adding a password leaves pre-existing 0644 permissions")
+}
+
+func TestAuditSSHConfigRoundTripLosesQuotedPath(t *testing.T) {
+ hosts:=map[string]config.Host{"prod":{Host:"example.invalid",IdentityFile:"/tmp/my keys/id_ed25519"}}
+ rendered:=renderSSHConfig(hosts)
+ parsed,err:=parseSSHConfigHosts(strings.NewReader(rendered));if err!=nil {t.Fatal(err)}
+ if parsed[0].Host.IdentityFile==hosts["prod"].IdentityFile {t.Fatal("bug not reproduced")}
+ t.Logf("CONFIRMED: export/import changes identity path to %q",parsed[0].Host.IdentityFile)
+}
+
+func TestAuditSFTPPasswordBatchDisablesPasswordAuth(t *testing.T) {
+ auditSetup(t)
+ if _,err:=os.Stat("/usr/bin/sftp");err!=nil {t.Skip(err)}
+ dir:=t.TempDir();capture:=filepath.Join(dir,"args");transport:=filepath.Join(dir,"ssh");wrapper:=filepath.Join(dir,"sftp")
+ t.Setenv("AUDIT_ARGS",capture);t.Setenv("AUDIT_TRANSPORT",transport)
+ if err:=os.WriteFile(transport,[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$AUDIT_ARGS\"\nexit 1\n"),0700);err!=nil {t.Fatal(err)}
+ if err:=os.WriteFile(wrapper,[]byte("#!/bin/sh\nexec /usr/bin/sftp -S \"$AUDIT_TRANSPORT\" \"$@\"\n"),0700);err!=nil {t.Fatal(err)}
+ t.Setenv("SHBX_SFTP_BIN",wrapper)
+ _=runSFTPProcess(config.Host{Host:"example.invalid",Password:"dummy"},buildSFTPArgs(config.Host{Host:"example.invalid"},""),"ls\n")
+ args,err:=os.ReadFile(capture);if err!=nil {t.Fatal(err)}
+ if !strings.Contains(strings.ToLower(string(args)),"batchmode yes") {t.Fatalf("unexpected args: %s",args)}
+ t.Log("CONFIRMED using system sftp: password batch invokes SSH with -oBatchMode=yes")
+}
+
+func TestAuditPasswordInjectedIntoApplicationPrompt(t *testing.T) {
+ master,slave,err:=pty.Open();if err!=nil {t.Fatal(err)}
+ defer master.Close();defer slave.Close()
+ _,err=term.MakeRaw(int(slave.Fd()));if err!=nil {t.Fatal(err)}
+ done:=make(chan error,1)
+ go func(){done<-copySSHOutputAndInjectPassword(io.Discard,master,"dummy-audit-secret")}()
+ if _,err:=slave.Write([]byte("Authenticated with public key.\r\nApplication password:"));err!=nil {t.Fatal(err)}
+ read:=make(chan []byte,1)
+ go func(){b:=make([]byte,128);n,_:=slave.Read(b);read<-b[:n]}()
+ select {case b:=<-read:if !bytes.Contains(b,[]byte("dummy-audit-secret")){t.Fatal("bug not reproduced")};t.Log("CONFIRMED: stored SSH password is injected into post-login application input")
+ case <-time.After(2*time.Second):t.Fatal("timed out")}
+ master.Close();slave.Close();<-done
+}
+
+func TestAuditDoctorReportsFailureWithSuccessReturn(t *testing.T) {
+ path,_:=auditSetup(t);if err:=os.WriteFile(path,[]byte("broken"),0600);err!=nil {t.Fatal(err)}
+ var out bytes.Buffer
+ err:=(App{in:strings.NewReader(""),out:&out}).Run([]string{"doctor"})
+ if err!=nil||!strings.Contains(out.String(),"[FAIL]"){t.Fatalf("bug not reproduced: %v %s",err,out.String())}
+ t.Log("CONFIRMED: doctor emits FAIL but returns nil, hence CLI exit code 0")
+}
+
+func TestAuditTypingQQuitsForms(t *testing.T) {
+ path,cfg:=auditSetup(t)
+ for _,screen:=range []string{"host","tunnel"} {
+ m:=newTUIModelWithState(path,cfg,nil)
+ var model tea.Model
+ if screen=="host" {model,_=m.openForm("",config.Host{})} else {model,_=m.openTunnelForm("",config.Tunnel{Type:"local"})}
+ model,cmd:=model.Update(tea.KeyMsg{Type:tea.KeyRunes,Runes:[]rune{'q'}})
+ if cmd==nil {t.Fatal("bug not reproduced")}
+ if _,ok:=cmd().(tea.QuitMsg);!ok {t.Fatal("not quit command")}
+ t.Logf("CONFIRMED: typing q in %s form quits app",screen)
+ }
+}
+
+func TestAuditShortFormHidesFocusedInputAndErrors(t *testing.T) {
+ path,cfg:=auditSetup(t)
+ m:=newTUIModelWithState(path,cfg,nil);m.width=80;m.height=15
+ model,_:=m.openTunnelForm("",config.Tunnel{Type:"local"});m=model.(tuiModel)
+ m.focus=tuiTunnelFieldGroup;m.inputs[tuiTunnelFieldGroup].SetValue("UNIQUE_FOCUSED_GROUP")
+ m.err=fmt.Errorf("UNIQUE_VALIDATION_ERROR")
+ view:=m.View()
+ if strings.Contains(view,"UNIQUE_FOCUSED_GROUP")||strings.Contains(view,"UNIQUE_VALIDATION_ERROR") {t.Fatalf("bug not reproduced: %s",view)}
+ t.Log("CONFIRMED: at 80x15 focused Group input and validation error are clipped")
+}

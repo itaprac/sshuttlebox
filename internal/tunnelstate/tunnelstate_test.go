@@ -85,7 +85,7 @@ func TestLoadMissingFileReturnsDefaultState(t *testing.T) {
 	}
 }
 
-func TestGetPrunesDeadPID(t *testing.T) {
+func TestGetDoesNotPruneDeadPID(t *testing.T) {
 	useTempStateHome(t)
 
 	if err := Save(State{Tunnels: map[string]Entry{
@@ -104,12 +104,12 @@ func TestGetPrunesDeadPID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if _, ok := got.Tunnels["dead"]; ok {
-		t.Fatalf("Get() did not prune dead tunnel, state = %+v", got.Tunnels)
+	if _, ok := got.Tunnels["dead"]; !ok {
+		t.Fatalf("Get() removed dead tunnel, state = %+v", got.Tunnels)
 	}
 }
 
-func TestGetPrunesFailedControlSocketCheckEvenWhenPIDIsAlive(t *testing.T) {
+func TestGetDoesNotPruneMissingControlSocketEvenWhenPIDIsAlive(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake SSH script uses sh")
 	}
@@ -141,8 +141,8 @@ func TestGetPrunesFailedControlSocketCheckEvenWhenPIDIsAlive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if _, ok := got.Tunnels["stale"]; ok {
-		t.Fatalf("Get() did not prune stale tunnel, state = %+v", got.Tunnels)
+	if _, ok := got.Tunnels["stale"]; !ok {
+		t.Fatalf("Get() removed stale tunnel, state = %+v", got.Tunnels)
 	}
 }
 
@@ -185,13 +185,13 @@ func TestGetUsesControlSocketCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fake ssh args: %v", err)
 	}
-	wantArgs := "-S\n" + controlPath + "\n-O\ncheck\nuser@example.com\n"
+	wantArgs := "-S\n" + controlPath + "\n-O\ncheck\n-F\n" + os.DevNull + "\n-o\nBatchMode=yes\n-o\nStrictHostKeyChecking=yes\nuser@example.com\n"
 	if string(args) != wantArgs {
 		t.Fatalf("ssh args = %q, want %q", string(args), wantArgs)
 	}
 }
 
-func TestPruneRemovesFailedControlSocketCheckEvenWhenPIDIsAlive(t *testing.T) {
+func TestPrunePreservesFailedControlSocketCheck(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake SSH script uses sh")
 	}
@@ -216,13 +216,18 @@ func TestPruneRemovesFailedControlSocketCheckEvenWhenPIDIsAlive(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	got, err := Prune()
+	_, err := Prune()
+	if err == nil {
+		t.Fatal("expected unknown status error")
+	}
+	got, err := Load()
 	if err != nil {
-		t.Fatalf("Prune() error = %v", err)
+		t.Fatal(err)
 	}
-	if _, ok := got.Tunnels["stale"]; ok {
-		t.Fatalf("Prune() kept tunnel after failed control check, state = %+v", got.Tunnels)
+	if _, ok := got.Tunnels["stale"]; !ok {
+		t.Fatal("Prune removed an entry whose status is unknown")
 	}
+
 }
 
 func TestPruneRemovesDeadPIDAndKeepsRunningPID(t *testing.T) {
@@ -262,7 +267,7 @@ func fakeSSH(t *testing.T, exitCode int) (string, string) {
 	sshPath := filepath.Join(dir, "ssh")
 	script := `#!/bin/sh
 printf '%s\n' "$@" > "$SHBX_SSH_ARGS_FILE"
-if [ "$1" = "-S" ] && [ "$2" = "$SHBX_EXPECT_CONTROL" ] && [ "$3" = "-O" ] && [ "$4" = "check" ] && [ "$5" = "$SHBX_EXPECT_TARGET" ]; then
+if [ "$1" = "-S" ] && [ "$2" = "$SHBX_EXPECT_CONTROL" ] && [ "$3" = "-O" ] && [ "$4" = "check" ] && [ "${11}" = "$SHBX_EXPECT_TARGET" ]; then
 	exit "$SHBX_SSH_EXIT"
 fi
 exit 64

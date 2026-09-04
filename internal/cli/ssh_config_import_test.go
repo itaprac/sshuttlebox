@@ -38,9 +38,9 @@ Host jump
 	if !strings.Contains(out.String(), "Imported 3 host(s)") {
 		t.Fatalf("unexpected import output %q", out.String())
 	}
-	assertHost(t, "prod", config.Host{Host: "192.0.2.10", User: "deploy", Port: 2222, IdentityFile: "~/.ssh/id_ed25519"})
-	assertHost(t, "prod-alias", config.Host{Host: "192.0.2.10", User: "deploy", Port: 2222, IdentityFile: "~/.ssh/id_ed25519"})
-	assertHost(t, "jump", config.Host{Host: "jump", User: "ubuntu"})
+	assertHost(t, "prod", config.Host{Host: "prod", SSHConfigFile: sshConfig})
+	assertHost(t, "prod-alias", config.Host{Host: "prod-alias", SSHConfigFile: sshConfig})
+	assertHost(t, "jump", config.Host{Host: "jump", SSHConfigFile: sshConfig})
 	assertHostMissing(t, "*")
 	assertHostMissing(t, "*.example.com")
 }
@@ -60,7 +60,7 @@ Host prod
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "Would import 1 host(s)") || !strings.Contains(got, "prod -> deploy@prod.example:22") {
+	if !strings.Contains(got, "Would import 1 host(s)") || !strings.Contains(got, "prod -> OpenSSH alias prod") {
 		t.Fatalf("unexpected dry-run output %q", got)
 	}
 	if exists, err := config.Exists(); err != nil {
@@ -92,7 +92,7 @@ Host dev
 		t.Fatalf("expected skipped host output, got %q", out.String())
 	}
 	assertHost(t, "prod", config.Host{Host: "old.example", User: "root"})
-	assertHost(t, "dev", config.Host{Host: "dev.example"})
+	assertHost(t, "dev", config.Host{Host: "dev", SSHConfigFile: sshConfig})
 }
 
 func writeSSHConfig(t *testing.T, home, content string) string {

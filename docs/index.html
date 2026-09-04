@@ -1195,6 +1195,11 @@
             if (!target) return;
             e.preventDefault();
             var top = target.getBoundingClientRect().top + window.pageYOffset - 24;
+            if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+              window.scrollTo(0, top);
+              history.replaceState(null, "", "#" + id);
+              return;
+            }
             var start = window.pageYOffset;
             var distance = top - start;
             var duration = Math.min(900, Math.max(400, Math.abs(distance) * 0.6));
@@ -1220,17 +1225,28 @@
         var cmd = document.getElementById("install-cmd");
         if (!btn || !cmd) return;
         var timer;
+        var feedback = document.createElement("span");
+        feedback.setAttribute("role", "status");
+        feedback.style.display = "block";
+        btn.insertAdjacentElement("afterend", feedback);
         btn.addEventListener("click", function () {
           var text = cmd.textContent || "";
           var done = function () {
             btn.classList.add("copied");
+            feedback.textContent = "Install command copied.";
             clearTimeout(timer);
             timer = setTimeout(function () {
               btn.classList.remove("copied");
+              feedback.textContent = "";
             }, 1600);
           };
+          var failed = function () {
+            clearTimeout(timer);
+            btn.classList.remove("copied");
+            feedback.textContent = "Copy failed. Select the command and copy it manually.";
+          };
           if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(done, done);
+            navigator.clipboard.writeText(text).then(done, failed);
           } else {
             var r = document.createRange();
             r.selectNode(cmd);
@@ -1238,9 +1254,9 @@
             sel.removeAllRanges();
             sel.addRange(r);
             try {
-              document.execCommand("copy");
-              done();
-            } catch (e) {}
+              if (document.execCommand("copy")) done();
+              else failed();
+            } catch (e) { failed(); }
             sel.removeAllRanges();
           }
         });

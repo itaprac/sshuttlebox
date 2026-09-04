@@ -82,6 +82,10 @@ func TestTUIHostRenameUpdatesDependentTunnels(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
+	cfg, err = config.LoadPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	model := newTUIModelWithState(path, cfg, nil)
 	model = openTUIForm(t, model, "prod", model.cfg.Hosts["prod"])
 	setTUIFormValues(&model, "staging", "prod.example", "deploy", "", "", "")
@@ -450,7 +454,11 @@ func TestTUITunnelModeAddsEditsRemovesAndStartsTunnel(t *testing.T) {
 	assertTunnelMissing(t, "db")
 	assertTunnel(t, "socks", config.Tunnel{Host: "prod", Type: "dynamic", BindAddress: "127.0.0.1", LocalPort: 1080})
 
+	updated, _ := model.Update(model.refreshStatusCmd()())
+	model = updated.(tuiModel)
 	updated, cmd := model.updateMain(keyMsg(tea.KeyEnter))
+	model = updated.(tuiModel)
+	updated, cmd = model.Update(cmd())
 	model = updated.(tuiModel)
 	if model.tunnelName != "socks" {
 		t.Fatalf("tunnelName = %q, want socks", model.tunnelName)
@@ -461,7 +469,9 @@ func TestTUITunnelModeAddsEditsRemovesAndStartsTunnel(t *testing.T) {
 
 	model.tunnelName = ""
 	model.screen = tuiScreenRemove
-	updated, _ = model.updateRemove(keyMsg(tea.KeyEnter))
+	updated, cmd = model.updateRemove(keyMsg(tea.KeyEnter))
+	model = updated.(tuiModel)
+	updated, _ = model.Update(cmd())
 	model = updated.(tuiModel)
 	assertTunnelMissing(t, "socks")
 }
@@ -575,6 +585,8 @@ func TestTUITunnelRowsShowStatusSymbols(t *testing.T) {
 		},
 	}, nil)
 
+	updated, _ := model.Update(model.refreshStatusCmd()())
+	model = updated.(tuiModel)
 	focused := model.tunnelsPaneView(72, true)
 	if !strings.Contains(focused, "● running") {
 		t.Fatalf("focused tunnels pane missing running status symbol/text: %q", focused)

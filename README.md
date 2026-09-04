@@ -105,6 +105,7 @@ Check local setup health:
 ```bash
 shbx doctor
 shbx doctor --fix
+shbx doctor --json
 ```
 
 ## Usage
@@ -230,11 +231,55 @@ shbx config status   # show config counts and warnings
 > **Note on credentials:** saved passwords are stored in the local config file.
 > Prefer SSH keys whenever possible.
 
+## Safe updates and connection settings
+
+Config and tunnel state updates use private atomic files and locks. Independent
+edits from two terminals are merged. If both edit the same entry, the save fails
+with a conflict message. In the TUI, cancel the form and press `ctrl+r` to reload
+before you edit again. A config load error blocks writes until a reload succeeds.
+
+Stop a tunnel before changing its name, host, or forwarding settings.
+`shbx tunnel remove NAME --yes` skips the prompt but still refuses a running
+tunnel. `--force` stops the tunnel and confirms that it has stopped before it
+removes the entry. `shbx tunnel stop NAME` also works for a tunnel whose config
+entry is missing. Legacy state that contains only a PID cannot safely identify
+the process; stop that process yourself, then run `shbx doctor --fix`.
+
+Saved passwords pass through an OpenSSH authentication helper. They are not
+injected into terminal session text or passed as command arguments. Unattended
+connections require an already trusted host key. Connect interactively first to
+review and accept a new key. The config still stores saved passwords locally;
+new config files, backups, and exports use mode `0600`.
+
+Import OpenSSH aliases with:
+
+```bash
+shbx import ssh-config --path ~/.ssh/config
+```
+
+Imported entries refer to the original file. OpenSSH reads `Include`, `Match`,
+`ProxyJump`, wildcard defaults, and quoted paths when you connect. Keep that file
+available. Explicit shbx user, port, and key edits override its settings. Import
+lists literal aliases; patterns and dynamic Include paths cannot always provide
+an enumerable list, so import prints a warning. Export preserves linked files
+with `Include`. A renamed linked alias must use its original name for export.
+
+The TUI refreshes tunnel status in the background. `unknown` means a status check
+failed; it does not mean the tunnel is stopped. Forms keep the active field and
+validation message visible in short terminals. Use left/right or space on a
+tunnel's Type field to select its mode. SSH and SFTP sessions return to the same
+TUI selection and filter. During a pending write or tunnel operation, `ctrl+c`
+requests exit after the operation finishes.
+
+`shbx doctor` returns exit code 1 if any check fails. `shbx doctor --json` provides
+structured results for scripts. Warnings alone do not cause failure.
+
 ## Development
 
 ```bash
-# Run the full test suite
-go test ./...
+# Run tests and static checks
+go test -race ./...
+go vet ./...
 
 # Run the CLI directly from source
 go run ./cmd/shbx help
@@ -242,6 +287,23 @@ go run ./cmd/shbx help
 # Build a local binary
 go build -o shbx ./cmd/shbx
 ```
+
+The optional OpenSSH integration test uses a local password-only SFTP server.
+It creates temporary files and fake credentials and leaves your SSH config alone.
+Run it with Python 3.12 and Paramiko 5.0.0 in a separate virtual environment:
+
+```bash
+go build -o /tmp/shbx-test ./cmd/shbx
+python3 -m venv /tmp/shbx-test-venv
+/tmp/shbx-test-venv/bin/pip install paramiko==5.0.0
+/tmp/shbx-test-venv/bin/python tests/integration/ssh_password.py /tmp/shbx-test
+```
+
+On current macOS, Go 1.22 tests require `-ldflags=-linkmode=external`.
+Stable Go does not need this compatibility flag.
+
+CI checks Go 1.22 and stable Go, macOS and Linux, race detection, static analysis,
+reachable vulnerabilities, and OpenSSH password authentication and transfers.
 
 ## Contributing
 

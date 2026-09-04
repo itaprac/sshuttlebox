@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,15 +9,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 
-	"github.com/creack/pty"
 	"github.com/itaprac/sshuttlebox/internal/config"
 	"github.com/itaprac/sshuttlebox/internal/tunnelstate"
 	"golang.org/x/term"
@@ -34,16 +30,18 @@ type App struct {
 }
 
 type hostListItem struct {
-	Name         string `json:"name"`
-	Host         string `json:"host"`
-	User         string `json:"user"`
-	PasswordSet  bool   `json:"passwordSet"`
-	Port         int    `json:"port"`
-	IdentityFile string `json:"identityFile"`
-	Group        string `json:"group"`
+	SSHConfigFile string `json:"sshConfigFile,omitempty"`
+	Name          string `json:"name"`
+	Host          string `json:"host"`
+	User          string `json:"user"`
+	PasswordSet   bool   `json:"passwordSet"`
+	Port          int    `json:"port"`
+	IdentityFile  string `json:"identityFile"`
+	Group         string `json:"group"`
 }
 
 type tunnelListItem struct {
+	Error       string `json:"error,omitempty"`
 	Name        string `json:"name"`
 	Host        string `json:"host"`
 	Type        string `json:"type"`
@@ -330,16 +328,21 @@ func (a App) runAdd(args []string) error {
 	warnMissingIdentityFile(identityFile)
 
 	cfg.Hosts[name] = config.Host{
-		Host:         host,
-		User:         user,
-		Password:     password,
-		Port:         port,
-		IdentityFile: identityFile,
-		Group:        group,
+		SSHConfigFile: existingHost.SSHConfigFile,
+		Host:          host,
+		User:          user,
+		Password:      password,
+		Port:          port,
+		IdentityFile:  identityFile,
+		Group:         group,
 	}
 	ensureGroup(&cfg, group)
 
-	if err := config.Save(path, cfg); err != nil {
+	var affected []string
+	if existed && cfg.Hosts[name] != existingHost {
+		affected = dependentTunnelNames(cfg, name)
+	}
+	if err := withStoppedTunnels(affected, false, func() error { return config.Save(path, cfg) }); err != nil {
 		return err
 	}
 
@@ -387,13 +390,14 @@ func (a App) runList(args []string) error {
 		for _, name := range names {
 			host := cfg.Hosts[name]
 			items = append(items, hostListItem{
-				Name:         name,
-				Host:         host.Host,
-				User:         host.User,
-				PasswordSet:  host.Password != "",
-				Port:         host.Port,
-				IdentityFile: host.IdentityFile,
-				Group:        host.Group,
+				SSHConfigFile: host.SSHConfigFile,
+				Name:          name,
+				Host:          host.Host,
+				User:          host.User,
+				PasswordSet:   host.Password != "",
+				Port:          host.Port,
+				IdentityFile:  host.IdentityFile,
+				Group:         host.Group,
 			})
 		}
 		return json.NewEncoder(a.out).Encode(items)
@@ -442,8 +446,13 @@ func (a App) runShow(args []string) error {
 	}
 	if host.Port != 0 {
 		fmt.Fprintf(a.out, "Port: %d\n", host.Port)
+	} else if host.SSHConfigFile != "" {
+		fmt.Fprintln(a.out, "Port: inherited from OpenSSH config")
 	} else {
 		fmt.Fprintf(a.out, "Port: %d default\n", defaultSSHPort)
+	}
+	if host.SSHConfigFile != "" {
+		fmt.Fprintf(a.out, "OpenSSH config: %s\n", host.SSHConfigFile)
 	}
 	if host.IdentityFile != "" {
 		fmt.Fprintf(a.out, "Identity file: %s\n", host.IdentityFile)
@@ -727,7 +736,7 @@ func (a App) runTunnelAdd(args []string) error {
 
 	cfg.Tunnels[name] = tunnel
 	ensureGroup(&cfg, tunnel.Group)
-	if err := config.Save(path, cfg); err != nil {
+	if err := tunnelstate.WithStopped(name, false, func() error { return config.Save(path, cfg) }); err != nil {
 		return err
 	}
 
@@ -774,7 +783,7 @@ func (a App) runTunnelList(args []string) error {
 		return nil
 	}
 
-	state, err := tunnelstate.Prune()
+	state, err := tunnelStatusSnapshot(names)
 	if err != nil {
 		return err
 	}
@@ -784,7 +793,11 @@ func (a App) runTunnelList(args []string) error {
 		for _, name := range names {
 			tunnel := cfg.Tunnels[name]
 			status := formatTunnelStatus(state, name)
-			items = append(items, tunnelListItem{
+			problem := ""
+			if state[name].Err != nil {
+				problem = state[name].Err.Error()
+			}
+			items = append(items, tunnelListItem{Error: problem,
 				Name:        name,
 				Host:        tunnel.Host,
 				Type:        tunnel.Type,
@@ -924,41 +937,21 @@ func (a App) runTunnelStart(args []string) error {
 }
 
 func (a App) runTunnelStop(args []string) error {
-	const usage = "usage: shbx tunnel stop <name>"
-
 	if len(args) != 1 {
-		return errors.New(usage)
+		return errors.New("usage: shbx tunnel stop <name>")
 	}
-
 	name := strings.TrimSpace(args[0])
 	if name == "" {
 		return errors.New("tunnel name cannot be empty")
 	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	tunnel, ok := cfg.Tunnels[name]
-	if !ok {
-		return fmt.Errorf("tunnel %q not found", name)
-	}
-	host, ok := cfg.Hosts[tunnel.Host]
-	if !ok {
-		return fmt.Errorf("host %q for tunnel %q not found", tunnel.Host, name)
-	}
-
 	if entry, running, err := tunnelstate.Get(name); err != nil {
 		return err
-	} else if !running {
-		fmt.Fprintf(a.out, "Tunnel %q is not running\n", name)
-		return nil
-	} else {
+	} else if running {
 		fmt.Fprintf(a.out, "Stopping tunnel %q with pid %d...\n", name, entry.PID)
 	}
-	stopped, entry, err := stopTunnelByName(name, host)
+	entry, stopped, err := tunnelstate.Stop(name)
 	if err != nil {
-		return err
+		return fmt.Errorf("stop tunnel %q: %w", name, err)
 	}
 	if !stopped {
 		fmt.Fprintf(a.out, "Tunnel %q is not running\n", name)
@@ -1000,13 +993,13 @@ func (a App) runTunnelRemove(args []string) error {
 	if err != nil {
 		return err
 	}
-	tunnel, ok := cfg.Tunnels[name]
+	_, ok := cfg.Tunnels[name]
 	if !ok {
 		return fmt.Errorf("tunnel %q not found", name)
 	}
 	if entry, running, err := tunnelstate.Get(name); err != nil {
 		return err
-	} else if running && !*yesFlag && !*forceFlag {
+	} else if running && !*forceFlag {
 		return fmt.Errorf("tunnel %q is running with pid %d; stop it first or pass --force", name, entry.PID)
 	}
 
@@ -1026,15 +1019,10 @@ func (a App) runTunnelRemove(args []string) error {
 		}
 	}
 
-	if *forceFlag {
-		if host, ok := cfg.Hosts[tunnel.Host]; ok {
-			_, _, _ = stopTunnelByName(name, host)
-		} else {
-			_, _, _ = tunnelstate.Stop(name)
-		}
-	}
-	delete(cfg.Tunnels, name)
-	if err := config.Save(path, cfg); err != nil {
+	if err := tunnelstate.WithStopped(name, *forceFlag, func() error {
+		delete(cfg.Tunnels, name)
+		return config.Save(path, cfg)
+	}); err != nil {
 		return err
 	}
 
@@ -1271,6 +1259,8 @@ func (a App) runEdit(args []string) error {
 		return fmt.Errorf("host %q not found", name)
 	}
 	newName := name
+	originalHost := host
+	affected := dependentTunnelNames(cfg, name)
 
 	if fs.NFlag() == 0 {
 		if !isTerminalInput(a.in) {
@@ -1385,7 +1375,10 @@ func (a App) runEdit(args []string) error {
 	}
 	cfg.Hosts[newName] = host
 	ensureGroup(&cfg, host.Group)
-	if err := config.Save(path, cfg); err != nil {
+	if newName == name && host == originalHost {
+		affected = nil
+	}
+	if err := withStoppedTunnels(affected, false, func() error { return config.Save(path, cfg) }); err != nil {
 		return err
 	}
 
@@ -1456,13 +1449,13 @@ func (a App) runRemove(args []string) error {
 		}
 	}
 
-	for _, tunnelName := range dependentTunnels {
-		delete(cfg.Tunnels, tunnelName)
-		_, _, _ = tunnelstate.Stop(tunnelName)
-	}
-	delete(cfg.Hosts, name)
-
-	if err := config.Save(path, cfg); err != nil {
+	if err := withStoppedTunnels(dependentTunnels, *forceFlag, func() error {
+		for _, tunnelName := range dependentTunnels {
+			delete(cfg.Tunnels, tunnelName)
+		}
+		delete(cfg.Hosts, name)
+		return config.Save(path, cfg)
+	}); err != nil {
 		return err
 	}
 
@@ -1716,9 +1709,10 @@ Completion:
 Doctor:
   shbx doctor                   Check config, SSH, keys, and tunnels
   shbx doctor --fix             Apply safe automatic repairs
+  shbx doctor --json            Print checks as JSON; FAIL returns exit code 1
 
 Import:
-  shbx import ssh-config         Import hosts from ~/.ssh/config
+  shbx import ssh-config         Save aliases linked to ~/.ssh/config
   shbx import ssh-config --dry-run
 
 Config:
@@ -2225,81 +2219,6 @@ func parseDryRunArgs(args []string) ([]string, bool, error) {
 	return positional, dryRun, nil
 }
 
-func buildSSHArgs(host config.Host) []string {
-	port := host.Port
-	if port == 0 {
-		port = defaultSSHPort
-	}
-
-	args := []string{"-p", strconv.Itoa(port)}
-	if host.IdentityFile != "" {
-		args = append(args, "-i", host.IdentityFile)
-	}
-
-	return append(args, formatSSHTarget(host))
-}
-
-func buildSFTPArgs(host config.Host, remotePath string) []string {
-	port := host.Port
-	if port == 0 {
-		port = defaultSSHPort
-	}
-
-	args := []string{"-P", strconv.Itoa(port)}
-	if host.IdentityFile != "" {
-		args = append(args, "-i", host.IdentityFile)
-	}
-
-	return append(args, formatSFTPTarget(host, remotePath))
-}
-
-func buildTunnelSSHArgs(host config.Host, tunnel config.Tunnel) []string {
-	args := buildSSHArgs(host)
-	forwardFlag, spec := tunnelForwardSpec(tunnel)
-	args = append(args[:len(args)-1], "-N", "-T", forwardFlag, spec, args[len(args)-1])
-	return args
-}
-
-func buildTunnelStartSSHArgs(name string, host config.Host, tunnel config.Tunnel) ([]string, error) {
-	controlPath, err := tunnelstate.ControlPath(name)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(filepath.Dir(controlPath), 0o700); err != nil {
-		return nil, err
-	}
-	args := buildSSHArgs(host)
-	forwardFlag, spec := tunnelForwardSpec(tunnel)
-	args = append(args[:len(args)-1], "-o", "ExitOnForwardFailure=yes", "-M", "-S", controlPath, "-f", "-N", "-T", forwardFlag, spec, args[len(args)-1])
-	return args, nil
-}
-
-func buildTunnelControlSSHArgs(name string, host config.Host, operation string) ([]string, error) {
-	controlPath, err := tunnelstate.ControlPath(name)
-	if err != nil {
-		return nil, err
-	}
-	args := buildSSHArgs(host)
-	args = append(args[:len(args)-1], "-S", controlPath, "-O", operation, args[len(args)-1])
-	return args, nil
-}
-
-func tunnelForwardSpec(tunnel config.Tunnel) (string, string) {
-	bind := ""
-	if tunnel.BindAddress != "" {
-		bind = tunnel.BindAddress + ":"
-	}
-
-	switch tunnel.Type {
-	case "remote":
-		return "-R", fmt.Sprintf("%s%d:%s:%d", bind, tunnel.RemotePort, tunnel.RemoteHost, tunnel.LocalPort)
-	case "dynamic":
-		return "-D", fmt.Sprintf("%s%d", bind, tunnel.LocalPort)
-	default:
-		return "-L", fmt.Sprintf("%s%d:%s:%d", bind, tunnel.LocalPort, tunnel.RemoteHost, tunnel.RemotePort)
-	}
-}
-
 func validateTunnel(tunnel config.Tunnel, hosts map[string]config.Host) error {
 	if strings.TrimSpace(tunnel.Host) == "" {
 		return errors.New("missing saved host; pass --host")
@@ -2395,85 +2314,6 @@ func sftpBatchQuote(value string) string {
 	return `"` + replacer.Replace(value) + `"`
 }
 
-func startTunnelProcess(name string, host config.Host, tunnel config.Tunnel, allowPrompt bool) (pid int, err error) {
-	defer func() {
-		if err != nil {
-			cleanupFailedTunnelStartup(name, host)
-		}
-	}()
-
-	sshArgs, err := buildTunnelStartSSHArgs(name, host, tunnel)
-	if err != nil {
-		return 0, err
-	}
-	if host.Password != "" {
-		if err := runSSHWithStoredPassword(host.Password, sshArgs); err != nil {
-			return 0, err
-		}
-	} else {
-		if err := runSSHAndWait(sshArgs, allowPrompt); err != nil {
-			return 0, err
-		}
-	}
-
-	pid, err = tunnelMasterPID(name, host)
-	if err != nil {
-		return 0, err
-	}
-	controlPath, err := tunnelstate.ControlPath(name)
-	if err != nil {
-		return 0, err
-	}
-	if err := tunnelstate.Set(name, tunnelstate.NewEntry(pid, tunnelCommandString(host, sshArgs), controlPath)); err != nil {
-		return 0, err
-	}
-	return pid, nil
-}
-
-func cleanupFailedTunnelStartup(name string, host config.Host) {
-	if controlArgs, err := buildTunnelControlSSHArgs(name, host, "exit"); err == nil {
-		_ = runSSHAndWait(controlArgs, false)
-	}
-	_, _, _ = tunnelstate.Stop(name)
-}
-
-func stopTunnelByName(name string, host config.Host) (bool, tunnelstate.Entry, error) {
-	entry, running, err := tunnelstate.Get(name)
-	if err != nil {
-		return false, tunnelstate.Entry{}, err
-	}
-	if !running {
-		return false, tunnelstate.Entry{}, nil
-	}
-	controlArgs, err := buildTunnelControlSSHArgs(name, host, "exit")
-	if err == nil {
-		_ = runSSHAndWait(controlArgs, false)
-	}
-	_, _, stopErr := tunnelstate.Stop(name)
-	if stopErr != nil {
-		return false, tunnelstate.Entry{}, stopErr
-	}
-	return true, entry, nil
-}
-
-func runSSHAndWait(sshArgs []string, allowPrompt bool) error {
-	cmd := exec.Command(sshBinary(), sshArgs...)
-	var stderr bytes.Buffer
-	if allowPrompt {
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
-	} else {
-		cmd.Stdin = nil
-		cmd.Stdout = nil
-		cmd.Stderr = &stderr
-	}
-	if err := cmd.Run(); err != nil {
-		return sshRunError(err, stderr.String())
-	}
-	return nil
-}
-
 func runSFTPProcess(host config.Host, sftpArgs []string, batch string) error {
 	args := sftpArgs
 	batchPath := ""
@@ -2520,62 +2360,10 @@ func sshRunError(err error, output string) error {
 	return fmt.Errorf("%w: %s", err, output)
 }
 
-func tunnelMasterPID(name string, host config.Host) (int, error) {
-	controlArgs, err := buildTunnelControlSSHArgs(name, host, "check")
-	if err != nil {
-		return 0, err
-	}
-	cmd := exec.Command(sshBinary(), controlArgs...)
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
-	if err := cmd.Run(); err != nil {
-		return 0, fmt.Errorf("check tunnel master: %w: %s", err, strings.TrimSpace(output.String()))
-	}
-	pid, ok := parseMasterPID(output.String())
-	if !ok {
-		return 0, fmt.Errorf("cannot read tunnel master pid from: %s", strings.TrimSpace(output.String()))
-	}
-	return pid, nil
-}
-
-func parseMasterPID(output string) (int, bool) {
-	start := strings.Index(output, "pid=")
-	if start == -1 {
-		return 0, false
-	}
-	start += len("pid=")
-	end := start
-	for end < len(output) && output[end] >= '0' && output[end] <= '9' {
-		end++
-	}
-	if end == start {
-		return 0, false
-	}
-	pid, err := strconv.Atoi(output[start:end])
-	if err != nil {
-		return 0, false
-	}
-	return pid, true
-}
-
-func formatSSHTarget(host config.Host) string {
-	target := host.Host
-	if host.User != "" {
-		target = host.User + "@" + host.Host
-	}
-	return target
-}
-
-func formatSFTPTarget(host config.Host, remotePath string) string {
-	target := formatSSHTarget(host)
-	if remotePath != "" {
-		target += ":" + remotePath
-	}
-	return target
-}
-
 func formatListTarget(host config.Host) string {
+	if host.SSHConfigFile != "" && host.Port == 0 {
+		return formatSSHTarget(host) + " (OpenSSH config)"
+	}
 	port := host.Port
 	if port == 0 {
 		port = defaultSSHPort
@@ -2607,12 +2395,15 @@ func formatTunnelForward(tunnel config.Tunnel) string {
 	}
 }
 
-func formatTunnelStatus(state tunnelstate.State, name string) string {
-	entry, ok := state.Tunnels[name]
-	if !ok || !tunnelstate.IsRunning(entry.PID) {
-		return "stopped"
+func formatTunnelStatus(state map[string]tunnelstate.Status, name string) string {
+	status, ok := state[name]
+	if !ok || status.Err != nil {
+		return "unknown"
 	}
-	return "running"
+	if status.Running {
+		return "running"
+	}
+	return "stopped"
 }
 
 func ensureGroup(cfg *config.Config, name string) {
@@ -2828,219 +2619,6 @@ func sftpBinary() string {
 		return value
 	}
 	return "sftp"
-}
-
-func runSSHWithPassword(password string, sshArgs []string) error {
-	stdin, ok := terminalFile(os.Stdin)
-	if !ok {
-		return errors.New("password auto-login requires an interactive terminal")
-	}
-
-	cmd := exec.Command(sshBinary(), sshArgs...)
-	ptmx, err := startSSHPTY(cmd, stdin)
-	if err != nil {
-		return err
-	}
-	defer ptmx.Close()
-
-	resizeSignals := make(chan os.Signal, 1)
-	signal.Notify(resizeSignals, syscall.SIGWINCH)
-	defer func() {
-		signal.Stop(resizeSignals)
-		close(resizeSignals)
-	}()
-	go func() {
-		for range resizeSignals {
-			_ = pty.InheritSize(stdin, ptmx)
-		}
-	}()
-	resizeSignals <- syscall.SIGWINCH
-
-	oldState, err := term.MakeRaw(int(stdin.Fd()))
-	if err != nil {
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("set terminal raw mode: %w", err)
-	}
-	defer term.Restore(int(stdin.Fd()), oldState)
-
-	go func() {
-		_, _ = io.Copy(ptmx, stdin)
-	}()
-
-	outputDone := make(chan error, 1)
-	go func() {
-		outputDone <- copySSHOutputAndInjectPassword(os.Stdout, ptmx, password)
-	}()
-
-	waitErr := cmd.Wait()
-	_ = ptmx.Close()
-
-	outputErr := <-outputDone
-	if waitErr != nil {
-		return sshRunError(waitErr, "")
-	}
-	if outputErr != nil && !errors.Is(outputErr, os.ErrClosed) {
-		return outputErr
-	}
-	return nil
-}
-
-func runSFTPWithPassword(password string, sftpArgs []string) error {
-	stdin, ok := terminalFile(os.Stdin)
-	if !ok {
-		return errors.New("password auto-login requires an interactive terminal")
-	}
-
-	cmd := exec.Command(sftpBinary(), sftpArgs...)
-	ptmx, err := startSSHPTY(cmd, stdin)
-	if err != nil {
-		return err
-	}
-	defer ptmx.Close()
-
-	resizeSignals := make(chan os.Signal, 1)
-	signal.Notify(resizeSignals, syscall.SIGWINCH)
-	defer func() {
-		signal.Stop(resizeSignals)
-		close(resizeSignals)
-	}()
-	go func() {
-		for range resizeSignals {
-			_ = pty.InheritSize(stdin, ptmx)
-		}
-	}()
-	resizeSignals <- syscall.SIGWINCH
-
-	oldState, err := term.MakeRaw(int(stdin.Fd()))
-	if err != nil {
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("set terminal raw mode: %w", err)
-	}
-	defer term.Restore(int(stdin.Fd()), oldState)
-
-	go func() {
-		_, _ = io.Copy(ptmx, stdin)
-	}()
-
-	outputDone := make(chan error, 1)
-	go func() {
-		outputDone <- copySSHOutputAndInjectPassword(os.Stdout, ptmx, password)
-	}()
-
-	waitErr := cmd.Wait()
-	_ = ptmx.Close()
-
-	outputErr := <-outputDone
-	if waitErr != nil {
-		return sshRunError(waitErr, "")
-	}
-	if outputErr != nil && !errors.Is(outputErr, os.ErrClosed) {
-		return outputErr
-	}
-	return nil
-}
-
-func runSSHWithStoredPassword(password string, sshArgs []string) error {
-	cmd := exec.Command(sshBinary(), sshArgs...)
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return err
-	}
-
-	var output bytes.Buffer
-	outputDone := make(chan error, 1)
-	go func() {
-		outputDone <- copySSHOutputAndInjectPassword(&output, ptmx, password)
-	}()
-
-	waitErr := cmd.Wait()
-	_ = ptmx.Close()
-
-	outputErr := <-outputDone
-	if waitErr != nil {
-		return sshRunError(waitErr, output.String())
-	}
-	if outputErr != nil && !errors.Is(outputErr, os.ErrClosed) {
-		return outputErr
-	}
-	return nil
-}
-
-func runSFTPBatchWithPassword(password string, sftpArgs []string) error {
-	cmd := exec.Command(sftpBinary(), sftpArgs...)
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return err
-	}
-
-	var output bytes.Buffer
-	outputDone := make(chan error, 1)
-	go func() {
-		outputDone <- copySSHOutputAndInjectPassword(io.MultiWriter(os.Stdout, &output), ptmx, password)
-	}()
-
-	waitErr := cmd.Wait()
-	_ = ptmx.Close()
-
-	outputErr := <-outputDone
-	if waitErr != nil {
-		return sshRunError(waitErr, output.String())
-	}
-	if outputErr != nil && !errors.Is(outputErr, os.ErrClosed) {
-		return outputErr
-	}
-	return nil
-}
-
-func startSSHPTY(cmd *exec.Cmd, stdin *os.File) (*os.File, error) {
-	size, err := pty.GetsizeFull(stdin)
-	if err == nil {
-		return pty.StartWithSize(cmd, size)
-	}
-	return pty.Start(cmd)
-}
-
-func copySSHOutputAndInjectPassword(out io.Writer, ptmx *os.File, password string) error {
-	buf := make([]byte, 4096)
-	window := ""
-	passwordSent := false
-
-	for {
-		n, err := ptmx.Read(buf)
-		if n > 0 {
-			chunk := buf[:n]
-			if _, writeErr := out.Write(chunk); writeErr != nil {
-				return writeErr
-			}
-
-			window += string(chunk)
-			if len(window) > 512 {
-				window = window[len(window)-512:]
-			}
-
-			if !passwordSent && looksLikePasswordPrompt(window) {
-				if _, writeErr := ptmx.Write([]byte(password + "\n")); writeErr != nil {
-					return writeErr
-				}
-				passwordSent = true
-				window = ""
-			}
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, os.ErrClosed) || errors.Is(err, syscall.EIO) {
-				return nil
-			}
-			return err
-		}
-	}
-}
-
-func looksLikePasswordPrompt(text string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(text))
-	if !strings.HasSuffix(normalized, "password:") {
-		return false
-	}
-	return strings.Contains(normalized, "password:")
 }
 
 func shellQuote(value string) string {

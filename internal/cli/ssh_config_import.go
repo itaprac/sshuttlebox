@@ -55,13 +55,17 @@ func (a App) runImportSSHConfig(args []string) error {
 		sshConfigPath = filepath.Join(home, ".ssh", "config")
 	}
 
+	sshConfigPath, err := filepath.Abs(expandHomePath(sshConfigPath))
+	if err != nil {
+		return err
+	}
 	file, err := os.Open(sshConfigPath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	hosts, err := parseSSHConfigHosts(file)
+	aliases, warnings, err := collectSSHConfigAliases(sshConfigPath)
 	if err != nil {
 		return err
 	}
@@ -91,6 +95,10 @@ func (a App) runImportSSHConfig(args []string) error {
 		}
 	}
 
+	hosts := make([]sshConfigHost, 0, len(aliases))
+	for _, alias := range aliases {
+		hosts = append(hosts, sshConfigHost{Name: alias, Host: config.Host{Host: alias, SSHConfigFile: sshConfigPath}})
+	}
 	var imported []sshConfigHost
 	var skipped []string
 	for _, host := range hosts {
@@ -116,7 +124,11 @@ func (a App) runImportSSHConfig(args []string) error {
 		fmt.Fprintf(a.out, "Imported %d host(s)\n", len(imported))
 	}
 	for _, host := range imported {
-		fmt.Fprintf(a.out, "  %s -> %s\n", host.Name, formatListTarget(host.Host))
+		fmt.Fprintf(a.out, "  %s -> OpenSSH alias %s\n", host.Name, host.Host.Host)
+	}
+	fmt.Fprintf(a.out, "OpenSSH settings remain in %s; keep this file available.\n", sshConfigPath)
+	for _, warning := range warnings {
+		fmt.Fprintf(a.out, "Warning: %s\n", warning)
 	}
 	for _, name := range skipped {
 		fmt.Fprintf(a.out, "Skipped existing host %q\n", name)
@@ -151,7 +163,10 @@ func parseSSHConfigHosts(r io.Reader) ([]sshConfigHost, error) {
 
 	for scanner.Scan() {
 		lineNo++
-		fields := sshConfigFields(scanner.Text())
+		fields, err := splitSSHConfigFields(scanner.Text())
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %w", lineNo, err)
+		}
 		if len(fields) == 0 {
 			continue
 		}
@@ -163,6 +178,12 @@ func parseSSHConfigHosts(r io.Reader) ([]sshConfigHost, error) {
 			inHost = true
 			aliases = values
 			current = config.Host{}
+			continue
+		}
+		if key == "match" {
+			flush()
+			inHost = false
+			aliases = nil
 			continue
 		}
 		if !inHost || len(values) == 0 {
@@ -195,17 +216,155 @@ func parseSSHConfigHosts(r io.Reader) ([]sshConfigHost, error) {
 	return parsed, nil
 }
 
-func sshConfigFields(line string) []string {
-	line = strings.TrimSpace(stripSSHConfigComment(line))
-	if line == "" {
-		return nil
+// splitSSHConfigFields preserves quoted whitespace and OpenSSH key=value syntax.
+func splitSSHConfigFields(line string) ([]string, error) {
+	var fields []string
+	var word strings.Builder
+	var quote rune
+	escaped, started := false, false
+	flush := func() {
+		if started {
+			fields = append(fields, word.String())
+			word.Reset()
+			started = false
+		}
 	}
+	for _, r := range strings.TrimSpace(line) {
+		if escaped {
+			word.WriteRune(r)
+			started = true
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			started = true
+			continue
+		}
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+			} else {
+				word.WriteRune(r)
+			}
+			continue
+		}
+		switch r {
+		case '"', '\'':
+			quote = r
+			started = true
+		case '#':
+			flush()
+			return fields, nil
+		case ' ', '\t', '\r':
+			flush()
+		case '=':
+			if len(fields) == 0 {
+				flush()
+			} else if len(fields) == 1 && !started {
+				continue
+			} else {
+				word.WriteRune(r)
+				started = true
+			}
+		default:
+			word.WriteRune(r)
+			started = true
+		}
+	}
+	if quote != 0 || escaped {
+		return nil, errors.New("unterminated quote or escape in SSH config")
+	}
+	flush()
+	return fields, nil
+}
 
-	fields := strings.Fields(line)
-	for i, field := range fields {
-		fields[i] = strings.Trim(field, `"'`)
+// collectSSHConfigAliases discovers literal aliases; OpenSSH evaluates all settings at connection time.
+func collectSSHConfigAliases(path string) ([]string, []string, error) {
+	aliases := map[string]bool{}
+	visited := map[string]bool{}
+	warningSet := map[string]bool{}
+	var visit func(string, int) error
+	visit = func(path string, depth int) error {
+		if depth > 32 {
+			return errors.New("SSH config Include depth exceeds 32")
+		}
+		canonical, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+		if visited[canonical] {
+			return nil
+		}
+		visited[canonical] = true
+		file, err := os.Open(canonical)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 4096), 1024*1024)
+		for line := 1; scanner.Scan(); line++ {
+			fields, err := splitSSHConfigFields(scanner.Text())
+			if err != nil {
+				return fmt.Errorf("%s:%d: %w", canonical, line, err)
+			}
+			if len(fields) < 2 {
+				continue
+			}
+			switch strings.ToLower(fields[0]) {
+			case "host":
+				for _, alias := range fields[1:] {
+					if !isSSHConfigPattern(alias) {
+						aliases[alias] = true
+					} else {
+						warningSet["Host patterns are preserved by OpenSSH but cannot be listed as saved names."] = true
+					}
+				}
+			case "match":
+				warningSet["Aliases found under conditional blocks are checked by OpenSSH when you connect."] = true
+			case "include":
+				for _, pattern := range fields[1:] {
+					if strings.ContainsAny(pattern, "%$") {
+						warningSet["Include paths with tokens or environment variables are resolved only when you connect."] = true
+						continue
+					}
+					pattern = expandHomePath(pattern)
+					if !filepath.IsAbs(pattern) {
+						home, err := os.UserHomeDir()
+						if err != nil {
+							return err
+						}
+						pattern = filepath.Join(home, ".ssh", pattern)
+					}
+					paths, err := filepath.Glob(pattern)
+					if err != nil {
+						return err
+					}
+					for _, included := range paths {
+						if err := visit(included, depth+1); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+		return scanner.Err()
 	}
-	return fields
+	if err := visit(path, 0); err != nil {
+		return nil, nil, err
+	}
+	names := make([]string, 0, len(aliases))
+	for name := range aliases {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	warnings := make([]string, 0, len(warningSet))
+	for warning := range warningSet {
+		warnings = append(warnings, warning)
+	}
+	sort.Strings(warnings)
+	return names, warnings, nil
 }
 
 func stripSSHConfigComment(line string) string {

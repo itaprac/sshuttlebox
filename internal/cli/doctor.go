@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,22 +31,37 @@ type doctorCheck struct {
 }
 
 func (a App) runDoctor(args []string) error {
-	fix := false
-	switch len(args) {
-	case 0:
-	case 1:
-		if args[0] != "--fix" {
-			return errors.New("usage: shbx doctor [--fix]")
-		}
-		fix = true
-	default:
-		return errors.New("usage: shbx doctor [--fix]")
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fix := fs.Bool("fix", false, "Repair local config and state")
+	asJSON := fs.Bool("json", false, "Print structured checks")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || (*fix && *asJSON) {
+		return errors.New("usage: shbx doctor [--fix|--json]")
 	}
-
-	if fix {
+	if *fix {
 		return a.runDoctorFix()
 	}
-	fmt.Fprint(a.out, buildDoctorReport())
+	checks := collectDoctorChecks()
+	if *asJSON {
+		type result struct {
+			Level   string `json:"level"`
+			Message string `json:"message"`
+		}
+		results := make([]result, 0, len(checks))
+		for _, check := range checks {
+			results = append(results, result{doctorLevelLabel(check.level), check.text})
+		}
+		if err := json.NewEncoder(a.out).Encode(results); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprint(a.out, renderDoctorReport(checks))
+	}
+	for _, check := range checks {
+		if check.level == doctorFail {
+			return errors.New("doctor checks failed")
+		}
+	}
 	return nil
 }
 
@@ -62,8 +80,9 @@ func (a App) runDoctorFix() error {
 	return nil
 }
 
-func buildDoctorReport() string {
-	checks := collectDoctorChecks()
+func buildDoctorReport() string { return renderDoctorReport(collectDoctorChecks()) }
+
+func renderDoctorReport(checks []doctorCheck) string {
 	warnings := 0
 	failures := 0
 	for _, check := range checks {
@@ -177,6 +196,14 @@ func hostDoctorChecks(hosts map[string]config.Host) []doctorCheck {
 	var checks []doctorCheck
 	for _, name := range names {
 		host := hosts[name]
+		if host.SSHConfigFile != "" {
+			info, err := os.Stat(expandHomePath(host.SSHConfigFile))
+			if err != nil {
+				checks = append(checks, doctorCheck{level: doctorFail, text: fmt.Sprintf("host %q OpenSSH config: %s", name, err)})
+			} else if info.IsDir() {
+				checks = append(checks, doctorCheck{level: doctorFail, text: fmt.Sprintf("host %q OpenSSH config path is a directory", name)})
+			}
+		}
 		if strings.TrimSpace(name) == "" {
 			checks = append(checks, doctorCheck{level: doctorFail, text: "host with empty name"})
 		}
@@ -241,14 +268,22 @@ func passwordDoctorChecks(hosts map[string]config.Host) []doctorCheck {
 }
 
 func tunnelStateDoctorChecks() []doctorCheck {
-	state, err := tunnelstate.Load()
+	statuses, err := tunnelStatusSnapshot(nil)
 	if err != nil {
 		return []doctorCheck{{level: doctorFail, text: "check tunnel state: " + err.Error()}}
 	}
-	running := 0
-	stale := 0
-	for _, entry := range state.Tunnels {
-		if tunnelstate.EntryRunning(entry) {
+	running, stale := 0, 0
+	var failures []doctorCheck
+	names := make([]string, 0, len(statuses))
+	for name := range statuses {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		status := statuses[name]
+		if status.Err != nil {
+			failures = append(failures, doctorCheck{level: doctorFail, text: fmt.Sprintf("tunnel %q status unknown: %s", name, status.Err)})
+		} else if status.Running {
 			running++
 		} else {
 			stale++
@@ -258,7 +293,7 @@ func tunnelStateDoctorChecks() []doctorCheck {
 	if stale > 0 {
 		checks = append(checks, doctorCheck{level: doctorWarn, text: fmt.Sprintf("stale tunnel state: %d; run shbx doctor --fix", stale)})
 	}
-	return checks
+	return append(checks, failures...)
 }
 
 func applyDoctorFixes() ([]string, error) {
@@ -375,22 +410,19 @@ func ensureDoctorDir(path, label string) (string, error) {
 }
 
 func pruneDoctorTunnelState() (int, error) {
-	state, err := tunnelstate.Load()
+	before, err := tunnelstate.Load()
 	if err != nil {
 		return 0, fmt.Errorf("load tunnel state: %w", err)
 	}
-	pruned := 0
-	for name, entry := range state.Tunnels {
-		if !tunnelstate.EntryRunning(entry) {
-			delete(state.Tunnels, name)
-			pruned++
+	after, err := tunnelstate.Prune()
+	if err != nil {
+		return 0, fmt.Errorf("prune tunnel state: %w", err)
+	}
+	removed := 0
+	for name := range before.Tunnels {
+		if _, ok := after.Tunnels[name]; !ok {
+			removed++
 		}
 	}
-	if pruned == 0 {
-		return 0, nil
-	}
-	if err := tunnelstate.Save(state); err != nil {
-		return 0, fmt.Errorf("save tunnel state: %w", err)
-	}
-	return pruned, nil
+	return removed, nil
 }

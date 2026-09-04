@@ -14,7 +14,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/itaprac/sshuttlebox/internal/config"
-	"github.com/itaprac/sshuttlebox/internal/tunnelstate"
 )
 
 type tuiScreen int
@@ -71,6 +70,7 @@ type tuiTunnelItem struct {
 	name   string
 	tunnel config.Tunnel
 	group  string
+	status string
 }
 
 type tuiPaletteAction int
@@ -100,6 +100,8 @@ type tuiModel struct {
 	cfg          config.Config
 	names        []string
 	tunnelNames  []string
+	hostOrder    []string
+	tunnelOrder  []string
 	cursor       int
 	tunnelCursor int
 	mode         tuiMode
@@ -108,6 +110,12 @@ type tuiModel struct {
 	screen       tuiScreen
 	status       string
 	err          error
+	loadErr      error
+	statuses     map[string]tuiTunnelStatus
+	refreshing   bool
+	generation   uint64
+	quitPending  bool
+	busy         bool
 	connectName  string
 	sftpName     string
 	tunnelName   string
@@ -198,44 +206,32 @@ func (a App) runUI(args []string) error {
 		return errors.New("usage: shbx ui")
 	}
 
-	nextMode := tuiModeHosts
-	nextStatus := ""
+	model := newTUIModel()
 	for {
-		model := newTUIModel()
-		model.mode = nextMode
-		if model.mode == tuiModeTunnels {
-			model.filter.Placeholder = "filter tunnels"
-			model.ensureTunnelCursor()
-		}
-		if nextStatus != "" {
-			model.status = nextStatus
-			model.err = nil
-		}
-
 		program := tea.NewProgram(model, tea.WithAltScreen())
 		finalModel, err := program.Run()
 		if err != nil {
 			return err
 		}
-
 		tui, ok := finalModel.(tuiModel)
 		if !ok {
 			return nil
 		}
-		if tui.connectName != "" {
-			return a.runConnect([]string{tui.connectName})
-		}
-		if tui.sftpName != "" {
-			return a.runSFTP([]string{tui.sftpName})
-		}
-		if tui.tunnelName == "" {
+		var action string
+		switch {
+		case tui.connectName != "":
+			action = "SSH session"
+			err = a.runConnect([]string{tui.connectName})
+		case tui.sftpName != "":
+			action = "SFTP session"
+			err = a.runSFTP([]string{tui.sftpName})
+		case tui.tunnelName != "":
+			action = "Tunnel start"
+			err = a.runTunnelStart([]string{tui.tunnelName})
+		default:
 			return nil
 		}
-		if err := a.runTunnelStart([]string{tui.tunnelName}); err != nil {
-			return err
-		}
-		nextMode = tuiModeTunnels
-		nextStatus = fmt.Sprintf("Returned after starting tunnel %q.", tui.tunnelName)
+		model = tui.resumeAfterSession(action, err)
 	}
 }
 
@@ -277,16 +273,75 @@ func newTUIModelWithState(path string, cfg config.Config, err error) tuiModel {
 	model.reloadTunnelNames()
 	if err != nil {
 		model.err = err
+		model.loadErr = err
 	}
 	return model
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, m.refreshStatusCmd(), tuiStatusTick())
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tuiStatusTickMsg:
+		if m.refreshing || m.busy {
+			return m, tuiStatusTick()
+		}
+		m.refreshing = true
+		return m, tea.Batch(m.refreshStatusCmd(), tuiStatusTick())
+	case tuiStatusMsg:
+		m.refreshing = false
+		if msg.generation == m.generation && !m.busy {
+			m.statuses = msg.statuses
+		}
+		return m, nil
+	case tuiOperationMsg:
+		m.busy = false
+		if msg.interactiveName != "" {
+			if m.quitPending {
+				return m, tea.Quit
+			}
+			m.tunnelName = msg.interactiveName
+			return m, tea.Quit
+		}
+		m.generation++
+		if msg.err != nil {
+			m.setError(msg.err)
+		} else {
+			if msg.cfg != nil {
+				m.cfg = *msg.cfg
+				m.reloadNames()
+				m.reloadTunnelNames()
+			}
+			m.status = msg.status
+			m.err = nil
+			if msg.formSaved {
+				m.cursor = msg.cursor
+				m.tunnelCursor = msg.tunnelCursor
+				m.ensureActiveCursor()
+				m.screen = tuiScreenMain
+				m.inputs = nil
+			}
+		}
+		if m.quitPending {
+			return m, tea.Quit
+		}
+		return m, m.refreshStatusCmd()
+	case tuiReloadMsg:
+		m.generation++
+		if msg.err != nil {
+			m.loadErr = msg.err
+			m.setError(msg.err)
+		} else {
+			m.cfg = msg.cfg
+			m.loadErr = nil
+			m.err = nil
+			m.reloadNames()
+			m.reloadTunnelNames()
+			m.status = "Configuration reloaded."
+		}
+		return m, m.refreshStatusCmd()
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -296,6 +351,26 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputs[i].Width = maxInt(18, minInt(52, msg.Width-24))
 		}
 	case tea.KeyMsg:
+		if m.busy {
+			if msg.Type == tea.KeyCtrlC {
+				m.quitPending = true
+				m.status = "Finishing current operation before exit..."
+				return m, nil
+			}
+			return m, nil
+		}
+		if m.loadErr != nil {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "ctrl+r", "r":
+				return m, m.reloadConfigCmd()
+			}
+			return m, nil
+		}
+		if msg.String() == "ctrl+r" && m.screen == tuiScreenMain {
+			return m, m.reloadConfigCmd()
+		}
 		switch m.screen {
 		case tuiScreenMain:
 			return m.updateMain(msg)
@@ -377,33 +452,7 @@ func (m tuiModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 	case key.Matches(msg, m.keys.Connect):
-		if m.mode == tuiModeTunnels {
-			item, ok := m.selectedTunnelItem()
-			if !ok {
-				m.setError(errors.New("no tunnel selected"))
-				return m, nil
-			}
-			if _, running, err := tunnelstate.Get(item.name); err != nil {
-				m.setError(err)
-				return m, nil
-			} else if !running {
-				if host, ok := m.cfg.Hosts[item.tunnel.Host]; ok && host.Password == "" {
-					m.tunnelName = item.name
-					return m, tea.Quit
-				}
-			}
-			if err := m.toggleTunnel(item.name, item.tunnel); err != nil {
-				m.setError(err)
-			}
-			return m, nil
-		}
-		item, ok := m.selectedItem()
-		if !ok {
-			m.setError(errors.New("no host selected"))
-			return m, nil
-		}
-		m.connectName = item.name
-		return m, tea.Quit
+		return m.runSelectedConnect()
 	case key.Matches(msg, m.keys.SFTP):
 		return m.runSelectedSFTP()
 	case key.Matches(msg, m.keys.Preview):
@@ -500,7 +549,7 @@ func (m tuiModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = ""
 		m.err = nil
 		return m, nil
-	case key.Matches(msg, m.keys.Quit):
+	case msg.Type == tea.KeyCtrlC:
 		return m, tea.Quit
 	}
 
@@ -512,11 +561,7 @@ func (m tuiModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focusPrev()
 		return m, nil
 	case "enter", "ctrl+s":
-		if err := m.saveForm(); err != nil {
-			m.setError(err)
-			return m, nil
-		}
-		return m, nil
+		return m.beginSave(false)
 	}
 
 	var cmd tea.Cmd
@@ -549,7 +594,7 @@ func (m tuiModel) updateTunnelForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = ""
 		m.err = nil
 		return m, nil
-	case key.Matches(msg, m.keys.Quit):
+	case msg.Type == tea.KeyCtrlC:
 		return m, tea.Quit
 	}
 
@@ -561,13 +606,15 @@ func (m tuiModel) updateTunnelForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focusPrev()
 		return m, nil
 	case "enter", "ctrl+s":
-		if err := m.saveTunnelForm(); err != nil {
-			m.setError(err)
-			return m, nil
+		return m.beginSave(true)
+	}
+
+	if m.focus == tuiTunnelFieldType {
+		if msg.String() == "left" || msg.String() == "right" || msg.String() == " " {
+			m.cycleTunnelType(msg.String() == "left")
 		}
 		return m, nil
 	}
-
 	var cmd tea.Cmd
 	m.inputs[m.focus], cmd = m.inputs[m.focus].Update(msg)
 	return m, cmd
@@ -682,6 +729,10 @@ func (m tuiModel) updateGroupSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) updateRemove(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.loadErr != nil {
+		m.setError(m.loadErr)
+		return m, nil
+	}
 	switch msg.String() {
 	case "y", "Y", "enter":
 		if m.mode == tuiModeTunnels {
@@ -691,21 +742,7 @@ func (m tuiModel) updateRemove(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.setError(errors.New("no tunnel selected"))
 				return m, nil
 			}
-			if host, ok := m.cfg.Hosts[item.tunnel.Host]; ok {
-				_, _, _ = stopTunnelByName(item.name, host)
-			}
-			delete(m.cfg.Tunnels, item.name)
-			if err := config.Save(m.path, m.cfg); err != nil {
-				m.screen = tuiScreenMain
-				m.setError(err)
-				return m, nil
-			}
-			m.reloadTunnelNames()
-			m.ensureTunnelCursor()
-			m.screen = tuiScreenMain
-			m.status = fmt.Sprintf("Removed tunnel %q", item.name)
-			m.err = nil
-			return m, nil
+			return m.beginTunnelRemove(item)
 		}
 		item, ok := m.selectedItem()
 		if !ok {
@@ -719,12 +756,15 @@ func (m tuiModel) updateRemove(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setError(fmt.Errorf("host %q is used by tunnels: %s", item.name, strings.Join(dependentTunnels, ", ")))
 			return m, nil
 		}
-		delete(m.cfg.Hosts, item.name)
-		if err := config.Save(m.path, m.cfg); err != nil {
+		next := config.Clone(m.cfg)
+		delete(next.Hosts, item.name)
+		saved, err := config.SaveMerged(m.path, next)
+		if err != nil {
 			m.screen = tuiScreenMain
 			m.setError(err)
 			return m, nil
 		}
+		m.cfg = saved
 		m.reloadNames()
 		m.ensureCursor()
 		m.screen = tuiScreenMain
@@ -792,6 +832,10 @@ func (m tuiModel) updatePalette(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) View() string {
+	if m.loadErr != nil {
+		return trimToHeight("Cannot load configuration\n"+m.path+"\n"+wrapText(m.loadErr.Error(), maxInt(20, m.width))+"\n\nRepair the file or restore a backup with shbx config restore <file>.\nr: reload   q: quit", m.height)
+	}
+
 	if m.err != nil {
 		m.status = "Error: " + m.err.Error()
 	}
@@ -818,7 +862,7 @@ func (m tuiModel) View() string {
 		body = m.mainView()
 	}
 
-	footer := statusStyle.Render(m.status)
+	footer := statusStyle.Render(truncate(m.status, m.contentWidth()))
 	if m.status == "" {
 		footer = mutedStyle.Render("Ready.")
 	}
@@ -845,7 +889,7 @@ func (m tuiModel) View() string {
 }
 
 func (m tuiModel) showGlobalHelp() bool {
-	if m.screen == tuiScreenPreview {
+	if m.screen == tuiScreenPreview || m.screen == tuiScreenForm || m.screen == tuiScreenTunnelForm {
 		return false
 	}
 	if m.screen == tuiScreenMain && m.height > 0 && m.height < 18 {
@@ -1121,39 +1165,48 @@ func (m tuiModel) hostsPaneView(width int, focused bool, maxLines ...int) string
 		return clampLines(mutedStyle.Render(message), limit, 0)
 	}
 
-	lines := make([]string, 0, len(items)+4)
-	selectedLine := -1
+	rows := make([]tuiPaneRow, 0, len(items)+4)
 	if prefix != "" {
-		lines = append(lines, prefix, "")
+		rows = append(rows, tuiPaneRow{text: prefix}, tuiPaneRow{})
 	}
-	prevSection := "\x00"
+	selectedLine := 0
+	previous := "\x00"
 	for i, item := range items {
 		section := sectionLabel(item.group)
-		if section != prevSection {
+		if section != previous {
 			if i > 0 {
-				lines = append(lines, "")
+				rows = append(rows, tuiPaneRow{})
 			}
-			lines = append(lines, subSectionStyle.Render(section))
-			prevSection = section
+			rows = append(rows, tuiPaneRow{text: section, section: true})
+			previous = section
 		}
 		if i == m.cursor {
-			selectedLine = len(lines)
-			if focused {
-				line := hostRow(item, width-2, selectedTargetStyle)
-				lines = append(lines, selectedStyle.Render(fitRow("> "+line, width)))
-			} else {
-				line := hostRow(item, width-2, mutedStyle)
-				lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
-			}
-		} else {
-			line := hostRow(item, width-2, mutedStyle)
-			lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
+			selectedLine = len(rows)
 		}
+		rows = append(rows, tuiPaneRow{item: i, isItem: true})
 	}
 	if !focused {
 		selectedLine = 0
 	}
-	return clampLines(strings.Join(lines, "\n"), limit, selectedLine)
+	start, end := tuiVisibleRows(len(rows), limit, selectedLine)
+	lines := make([]string, 0, end-start)
+	for _, r := range rows[start:end] {
+		if !r.isItem {
+			text := r.text
+			if r.section {
+				text = subSectionStyle.Render(text)
+			}
+			lines = append(lines, text)
+			continue
+		}
+		item := items[r.item]
+		if focused && r.item == m.cursor {
+			lines = append(lines, selectedStyle.Render(fitRow("> "+hostRow(item, width-2, selectedTargetStyle), width)))
+		} else {
+			lines = append(lines, normalRowStyle.Render(fitRow("  "+hostRow(item, width-2, mutedStyle), width)))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m tuiModel) tunnelsPaneView(width int, focused bool, maxLines ...int) string {
@@ -1171,39 +1224,49 @@ func (m tuiModel) tunnelsPaneView(width int, focused bool, maxLines ...int) stri
 		return clampLines(mutedStyle.Render(message), limit, 0)
 	}
 
-	lines := make([]string, 0, len(items)+4)
-	selectedLine := -1
+	rows := make([]tuiPaneRow, 0, len(items)+4)
 	if prefix != "" {
-		lines = append(lines, prefix, "")
+		rows = append(rows, tuiPaneRow{text: prefix}, tuiPaneRow{})
 	}
-	prevSection := "\x00"
+	selectedLine := 0
+	previous := "\x00"
 	for i, item := range items {
 		section := sectionLabel(item.group)
-		if section != prevSection {
+		if section != previous {
 			if i > 0 {
-				lines = append(lines, "")
+				rows = append(rows, tuiPaneRow{})
 			}
-			lines = append(lines, subSectionStyle.Render(section))
-			prevSection = section
+			rows = append(rows, tuiPaneRow{text: section, section: true})
+			previous = section
 		}
 		if i == m.tunnelCursor {
-			selectedLine = len(lines)
-			if focused {
-				line := tunnelRow(item, width-2, selectedTargetStyle)
-				lines = append(lines, selectedStyle.Render(fitRow("> "+line, width)))
-			} else {
-				line := tunnelRow(item, width-2, mutedStyle)
-				lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
-			}
-		} else {
-			line := tunnelRow(item, width-2, mutedStyle)
-			lines = append(lines, normalRowStyle.Render(fitRow("  "+line, width)))
+			selectedLine = len(rows)
 		}
+		rows = append(rows, tuiPaneRow{item: i, isItem: true})
 	}
 	if !focused {
 		selectedLine = 0
 	}
-	return clampLines(strings.Join(lines, "\n"), limit, selectedLine)
+	start, end := tuiVisibleRows(len(rows), limit, selectedLine)
+	lines := make([]string, 0, end-start)
+	for _, r := range rows[start:end] {
+		if !r.isItem {
+			text := r.text
+			if r.section {
+				text = subSectionStyle.Render(text)
+			}
+			lines = append(lines, text)
+			continue
+		}
+		item := items[r.item]
+		item.status = m.tunnelStatus(item.name)
+		if focused && r.item == m.tunnelCursor {
+			lines = append(lines, selectedStyle.Render(fitRow("> "+tunnelRow(item, width-2, selectedTargetStyle), width)))
+		} else {
+			lines = append(lines, normalRowStyle.Render(fitRow("  "+tunnelRow(item, width-2, mutedStyle), width)))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func sectionLabel(group string) string {
@@ -1228,8 +1291,9 @@ func (m tuiModel) detailsView(width int) string {
 		"",
 		labelValue("Host", item.host.Host),
 		labelValue("User", optionalValue(item.host.User)),
-		labelValue("Port", strconv.Itoa(effectivePort(item.host))),
+		labelValue("Port", tuiHostPort(item.host)),
 		labelValue("Identity file", optionalValue(item.host.IdentityFile)),
+		labelValue("OpenSSH config", optionalValue(item.host.SSHConfigFile)),
 		labelValue("Group", optionalValue(item.host.Group)),
 		labelValue("Password", passwordStatus(item.host)),
 		"",
@@ -1251,9 +1315,9 @@ func (m tuiModel) tunnelDetailsView(width int) string {
 			command = tunnelCommandString(host, sshArgs)
 		}
 	}
-	status := "stopped"
-	if entry, running, _ := tunnelstate.Get(item.name); running {
-		status = fmt.Sprintf("running pid %d", entry.PID)
+	status := m.tunnelStatus(item.name)
+	if detail := m.statuses[item.name]; detail.err != nil {
+		status += ": " + detail.err.Error()
 	}
 	rows := []string{
 		titleStyle.Render(truncate(item.name, width)),
@@ -1275,28 +1339,10 @@ func (m tuiModel) formView() string {
 	if m.editOld != "" {
 		title = "Edit host"
 	}
-	lines := []string{titleStyle.Render(title), ""}
-	labels := []string{"Name", "Host", "User", "Password", "Port", "Identity file", "Group"}
-	hasReusableKeys := len(identityFileChoices(m.cfg.Hosts, m.editOld)) > 0
-	hasGroups := len(groupNames(m.cfg)) > 0
-	for i, input := range m.inputs {
-		label := labels[i]
-		if i == tuiFieldIdentityFile && hasReusableKeys {
-			label += " " + mutedStyle.Render("(ctrl+k)")
-		}
-		if i == tuiFieldGroup && hasGroups {
-			label += " " + mutedStyle.Render("(ctrl+g)")
-		}
-		if i == m.focus {
-			label = "> " + label
-		} else {
-			label = "  " + label
-		}
-		lines = append(lines, labelStyle.Render(label), input.View())
-	}
-	helpText := "ctrl+k: reuse key  ctrl+g: choose group  tab/down: next  enter/ctrl+s: save  esc: cancel"
-	lines = append(lines, "", mutedStyle.Render(helpText))
-	return strings.Join(lines, "\n")
+	labels := []string{"Name", "Host", "User", "Password", "Port", "Identity file (ctrl+k)", "Group (ctrl+g)"}
+	fields := []int{0, 1, 2, 3, 4, 5, 6}
+	helpText := "tab: next  ctrl+s: save  esc: cancel"
+	return m.formFieldsView(title, labels, fields, helpText)
 }
 
 func (m tuiModel) tunnelFormView() string {
@@ -1304,28 +1350,19 @@ func (m tuiModel) tunnelFormView() string {
 	if m.editTunnelOld != "" {
 		title = "Edit tunnel"
 	}
-	lines := []string{titleStyle.Render(title), ""}
-	labels := []string{"Name", "SSH host", "Type", "Bind address", "Local port", "Remote host", "Remote port", "Group"}
-	hasHosts := len(m.cfg.Hosts) > 0
-	hasGroups := len(groupNames(m.cfg)) > 0
-	for i, input := range m.inputs {
-		label := labels[i]
-		if i == tuiTunnelFieldHost && hasHosts {
-			label += " " + mutedStyle.Render("(ctrl+h)")
-		}
-		if i == tuiTunnelFieldGroup && hasGroups {
-			label += " " + mutedStyle.Render("(ctrl+g)")
-		}
-		if i == m.focus {
-			label = "> " + label
-		} else {
-			label = "  " + label
-		}
-		lines = append(lines, labelStyle.Render(label), input.View())
+	labels := []string{"Name", "SSH host (ctrl+h)", "Type (left/right)", "Local bind address", "Local listen port", "Remote target host", "Remote target port", "Group (ctrl+g)"}
+	switch m.inputs[tuiTunnelFieldType].Value() {
+	case "remote":
+		labels[tuiTunnelFieldBind] = "Remote bind address"
+		labels[tuiTunnelFieldLocalPort] = "Remote listen port"
+		labels[tuiTunnelFieldRemoteHost] = "Local target host"
+		labels[tuiTunnelFieldRemotePort] = "Local target port"
+	case "dynamic":
+		labels[tuiTunnelFieldLocalPort] = "SOCKS listen port"
 	}
-	helpText := "type: local/remote/dynamic  ctrl+h: choose host  ctrl+g: choose group  tab/down: next  enter/ctrl+s: save  esc: cancel"
-	lines = append(lines, "", mutedStyle.Render(helpText))
-	return strings.Join(lines, "\n")
+	fields := m.visibleFormFields()
+	helpText := "left/right: type  tab: next  ctrl+s: save  esc: cancel"
+	return m.formFieldsView(title, labels, fields, helpText)
 }
 
 func (m tuiModel) keySelectView() string {
@@ -1468,20 +1505,28 @@ func (m tuiModel) previewView() string {
 }
 
 func (m *tuiModel) reloadNames() {
-	m.names = m.names[:0]
+	m.names = make([]string, 0, len(m.cfg.Hosts))
 	for name := range m.cfg.Hosts {
 		m.names = append(m.names, name)
 	}
 	sort.Strings(m.names)
+	m.hostOrder = append([]string(nil), m.names...)
+	sort.SliceStable(m.hostOrder, func(i, j int) bool {
+		return tuiGroupLess(m.cfg.Hosts[m.hostOrder[i]].Group, m.cfg.Hosts[m.hostOrder[j]].Group)
+	})
 	m.ensureCursor()
 }
 
 func (m *tuiModel) reloadTunnelNames() {
-	m.tunnelNames = m.tunnelNames[:0]
+	m.tunnelNames = make([]string, 0, len(m.cfg.Tunnels))
 	for name := range m.cfg.Tunnels {
 		m.tunnelNames = append(m.tunnelNames, name)
 	}
 	sort.Strings(m.tunnelNames)
+	m.tunnelOrder = append([]string(nil), m.tunnelNames...)
+	sort.SliceStable(m.tunnelOrder, func(i, j int) bool {
+		return tuiGroupLess(m.cfg.Tunnels[m.tunnelOrder[i]].Group, m.cfg.Tunnels[m.tunnelOrder[j]].Group)
+	})
 	m.ensureTunnelCursor()
 }
 
@@ -1562,27 +1607,14 @@ func (m tuiModel) filteredItems() []tuiHostItem {
 	}
 
 	items := make([]tuiHostItem, 0, len(m.names))
-	for _, name := range m.names {
+	for _, name := range m.hostOrder {
 		host := m.cfg.Hosts[name]
 		if !matches(name, host) {
 			continue
 		}
 		items = append(items, tuiHostItem{name: name, host: host, group: host.Group})
 	}
-	sort.SliceStable(items, func(i, j int) bool {
-		leftGroup := sectionLabel(items[i].group)
-		rightGroup := sectionLabel(items[j].group)
-		if leftGroup != rightGroup {
-			if leftGroup == "ungrouped" {
-				return false
-			}
-			if rightGroup == "ungrouped" {
-				return true
-			}
-			return leftGroup < rightGroup
-		}
-		return items[i].name < items[j].name
-	})
+
 	return items
 }
 
@@ -1597,27 +1629,14 @@ func (m tuiModel) filteredTunnelItems() []tuiTunnelItem {
 	}
 
 	items := make([]tuiTunnelItem, 0, len(m.tunnelNames))
-	for _, name := range m.tunnelNames {
+	for _, name := range m.tunnelOrder {
 		tunnel := m.cfg.Tunnels[name]
 		if !matches(name, tunnel) {
 			continue
 		}
 		items = append(items, tuiTunnelItem{name: name, tunnel: tunnel, group: tunnel.Group})
 	}
-	sort.SliceStable(items, func(i, j int) bool {
-		leftGroup := sectionLabel(items[i].group)
-		rightGroup := sectionLabel(items[j].group)
-		if leftGroup != rightGroup {
-			if leftGroup == "ungrouped" {
-				return false
-			}
-			if rightGroup == "ungrouped" {
-				return true
-			}
-			return leftGroup < rightGroup
-		}
-		return items[i].name < items[j].name
-	})
+
 	return items
 }
 
@@ -1690,26 +1709,10 @@ func (m tuiModel) runSelectedConnect() (tea.Model, tea.Cmd) {
 	if m.mode == tuiModeTunnels {
 		item, ok := m.selectedTunnelItem()
 		if !ok {
-			m.screen = tuiScreenMain
 			m.setError(errors.New("no tunnel selected"))
 			return m, nil
 		}
-		if _, running, err := tunnelstate.Get(item.name); err != nil {
-			m.screen = tuiScreenMain
-			m.setError(err)
-			return m, nil
-		} else if !running {
-			if host, ok := m.cfg.Hosts[item.tunnel.Host]; ok && host.Password == "" {
-				m.tunnelName = item.name
-				return m, tea.Quit
-			}
-		}
-		if err := m.toggleTunnel(item.name, item.tunnel); err != nil {
-			m.screen = tuiScreenMain
-			m.setError(err)
-		}
-		m.screen = tuiScreenMain
-		return m, nil
+		return m.beginTunnelToggle(item)
 	}
 
 	item, ok := m.selectedItem()
@@ -1927,8 +1930,16 @@ func (m tuiModel) runPaletteAction(action tuiPaletteAction) (tea.Model, tea.Cmd)
 }
 
 func (m tuiModel) openForm(name string, host config.Host) (tea.Model, tea.Cmd) {
+	if m.loadErr != nil {
+		m.setError(m.loadErr)
+		m.screen = tuiScreenMain
+		return m, nil
+	}
 	inputs := make([]textinput.Model, tuiFieldCount)
 	placeholders := []string{"prod", "192.0.2.10", "deploy", "optional", "22", "~/.ssh/id_ed25519", "work"}
+	if host.SSHConfigFile != "" {
+		placeholders[tuiFieldPort] = "inherited from OpenSSH config"
+	}
 	values := []string{name, host.Host, host.User, host.Password, "", host.IdentityFile, host.Group}
 	if host.Port != 0 {
 		values[tuiFieldPort] = strconv.Itoa(host.Port)
@@ -1961,6 +1972,11 @@ func (m tuiModel) openForm(name string, host config.Host) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) openTunnelForm(name string, tunnel config.Tunnel) (tea.Model, tea.Cmd) {
+	if m.loadErr != nil {
+		m.setError(m.loadErr)
+		m.screen = tuiScreenMain
+		return m, nil
+	}
 	inputs := make([]textinput.Model, tuiTunnelFieldCount)
 	placeholders := []string{"db", "prod", "local", "127.0.0.1", "5432", "127.0.0.1", "5432", "work"}
 	values := []string{name, tunnel.Host, tunnel.Type, tunnel.BindAddress, "", tunnel.RemoteHost, "", tunnel.Group}
@@ -1997,20 +2013,8 @@ func (m tuiModel) openTunnelForm(name string, tunnel config.Tunnel) (tea.Model, 
 	return m, cmd
 }
 
-func (m *tuiModel) focusNext() {
-	m.inputs[m.focus].Blur()
-	m.focus = (m.focus + 1) % len(m.inputs)
-	m.inputs[m.focus].Focus()
-}
-
-func (m *tuiModel) focusPrev() {
-	m.inputs[m.focus].Blur()
-	m.focus--
-	if m.focus < 0 {
-		m.focus = len(m.inputs) - 1
-	}
-	m.inputs[m.focus].Focus()
-}
+func (m *tuiModel) focusNext() { m.moveFormFocus(1) }
+func (m *tuiModel) focusPrev() { m.moveFormFocus(-1) }
 
 func (m *tuiModel) openKeySelect() bool {
 	choices := identityFileChoices(m.cfg.Hosts, m.editOld)
@@ -2085,6 +2089,10 @@ func (m *tuiModel) openGroupSelect(returnScreen tuiScreen, field int) bool {
 }
 
 func (m *tuiModel) saveForm() error {
+	if m.loadErr != nil {
+		return m.loadErr
+	}
+	next := config.Clone(m.cfg)
 	name := strings.TrimSpace(m.inputs[tuiFieldName].Value())
 	host := config.Host{
 		Host:         strings.TrimSpace(m.inputs[tuiFieldHost].Value()),
@@ -2092,6 +2100,9 @@ func (m *tuiModel) saveForm() error {
 		Password:     m.inputs[tuiFieldPassword].Value(),
 		IdentityFile: strings.TrimSpace(m.inputs[tuiFieldIdentityFile].Value()),
 		Group:        strings.TrimSpace(m.inputs[tuiFieldGroup].Value()),
+	}
+	if m.editOld != "" {
+		host.SSHConfigFile = next.Hosts[m.editOld].SSHConfigFile
 	}
 	if name == "" {
 		return errors.New("host name cannot be empty")
@@ -2110,23 +2121,31 @@ func (m *tuiModel) saveForm() error {
 	if host.Port < 0 || host.Port > 65535 {
 		return fmt.Errorf("invalid port %d", host.Port)
 	}
+	var dependent []string
+	if m.editOld != "" && (name != m.editOld || host != next.Hosts[m.editOld]) {
+		dependent = dependentTunnelNames(next, m.editOld)
+	}
+
 	if m.editOld == "" {
-		if _, exists := m.cfg.Hosts[name]; exists {
+		if _, exists := next.Hosts[name]; exists {
 			return fmt.Errorf("host %q already exists", name)
 		}
 	} else if name != m.editOld {
-		if _, exists := m.cfg.Hosts[name]; exists {
+		if _, exists := next.Hosts[name]; exists {
 			return fmt.Errorf("host %q already exists", name)
 		}
-		delete(m.cfg.Hosts, m.editOld)
-		renameTunnelHostReferences(&m.cfg, m.editOld, name)
+		delete(next.Hosts, m.editOld)
+		renameTunnelHostReferences(&next, m.editOld, name)
 	}
 
-	m.cfg.Hosts[name] = host
-	ensureGroup(&m.cfg, host.Group)
-	if err := config.Save(m.path, m.cfg); err != nil {
+	next.Hosts[name] = host
+	ensureGroup(&next, host.Group)
+	var saved config.Config
+	err := withStoppedTunnels(dependent, false, func() error { var err error; saved, err = config.SaveMerged(m.path, next); return err })
+	if err != nil {
 		return err
 	}
+	m.cfg = saved
 	m.reloadNames()
 	for i, existing := range m.filteredItems() {
 		if existing.name == name {
@@ -2152,6 +2171,10 @@ func (m *tuiModel) saveForm() error {
 }
 
 func (m *tuiModel) saveTunnelForm() error {
+	if m.loadErr != nil {
+		return m.loadErr
+	}
+	next := config.Clone(m.cfg)
 	name := strings.TrimSpace(m.inputs[tuiTunnelFieldName].Value())
 	tunnel := config.Tunnel{
 		Host:        strings.TrimSpace(m.inputs[tuiTunnelFieldHost].Value()),
@@ -2175,7 +2198,7 @@ func (m *tuiModel) saveTunnelForm() error {
 		tunnel.LocalPort = port
 	}
 	remotePortText := strings.TrimSpace(m.inputs[tuiTunnelFieldRemotePort].Value())
-	if remotePortText != "" {
+	if remotePortText != "" && tunnel.Type != "dynamic" {
 		port, err := strconv.Atoi(remotePortText)
 		if err != nil {
 			return fmt.Errorf("invalid remote port %q", remotePortText)
@@ -2186,25 +2209,34 @@ func (m *tuiModel) saveTunnelForm() error {
 		tunnel.RemoteHost = ""
 		tunnel.RemotePort = 0
 	}
-	if err := validateTunnel(tunnel, m.cfg.Hosts); err != nil {
+	if err := validateTunnel(tunnel, next.Hosts); err != nil {
 		return err
 	}
+
 	if m.editTunnelOld == "" {
-		if _, exists := m.cfg.Tunnels[name]; exists {
+		if _, exists := next.Tunnels[name]; exists {
 			return fmt.Errorf("tunnel %q already exists", name)
 		}
 	} else if name != m.editTunnelOld {
-		if _, exists := m.cfg.Tunnels[name]; exists {
+		if _, exists := next.Tunnels[name]; exists {
 			return fmt.Errorf("tunnel %q already exists", name)
 		}
-		delete(m.cfg.Tunnels, m.editTunnelOld)
+		delete(next.Tunnels, m.editTunnelOld)
 	}
 
-	m.cfg.Tunnels[name] = tunnel
-	ensureGroup(&m.cfg, tunnel.Group)
-	if err := config.Save(m.path, m.cfg); err != nil {
+	next.Tunnels[name] = tunnel
+	ensureGroup(&next, tunnel.Group)
+	var saved config.Config
+	save := func() error { var err error; saved, err = config.SaveMerged(m.path, next); return err }
+	names := []string{name}
+	if m.editTunnelOld != "" && m.editTunnelOld != name {
+		names = append(names, m.editTunnelOld)
+	}
+	err := withStoppedTunnels(names, false, save)
+	if err != nil {
 		return err
 	}
+	m.cfg = saved
 	m.reloadTunnelNames()
 	for i, existing := range m.filteredTunnelItems() {
 		if existing.name == name {
@@ -2221,43 +2253,6 @@ func (m *tuiModel) saveTunnelForm() error {
 		action = "Updated"
 	}
 	m.status = fmt.Sprintf("%s tunnel %q", action, name)
-	m.err = nil
-	return nil
-}
-
-func (m *tuiModel) toggleTunnel(name string, tunnel config.Tunnel) error {
-	if entry, running, err := tunnelstate.Get(name); err != nil {
-		return err
-	} else if running {
-		host, ok := m.cfg.Hosts[tunnel.Host]
-		if !ok {
-			return fmt.Errorf("host %q for tunnel %q not found", tunnel.Host, name)
-		}
-		stopped, _, err := stopTunnelByName(name, host)
-		if err != nil {
-			return err
-		}
-		if stopped {
-			m.status = fmt.Sprintf("Stopped tunnel %q with pid %d", name, entry.PID)
-		} else {
-			m.status = fmt.Sprintf("Tunnel %q is not running", name)
-		}
-		m.err = nil
-		return nil
-	}
-
-	host, ok := m.cfg.Hosts[tunnel.Host]
-	if !ok {
-		return fmt.Errorf("host %q for tunnel %q not found", tunnel.Host, name)
-	}
-	if err := validateTunnel(tunnel, m.cfg.Hosts); err != nil {
-		return err
-	}
-	pid, err := startTunnelProcess(name, host, tunnel, false)
-	if err != nil {
-		return err
-	}
-	m.status = fmt.Sprintf("Started tunnel %q in background with pid %d", name, pid)
 	m.err = nil
 	return nil
 }
@@ -2356,7 +2351,7 @@ func tunnelRow(item tuiTunnelItem, width int, targetStyle lipgloss.Style) string
 		return ""
 	}
 	name := item.name
-	target := tunnelStatusLabel(item.name) + "  " + formatTunnelForward(item.tunnel)
+	target := tunnelStatusLabel(item.status) + "  " + formatTunnelForward(item.tunnel)
 	full := name + "  " + targetStyle.Render(target)
 	if lipgloss.Width(name)+2+lipgloss.Width(target) <= width {
 		return full
@@ -2372,11 +2367,17 @@ func tunnelRow(item tuiTunnelItem, width int, targetStyle lipgloss.Style) string
 	return truncate(name+"  "+target, width)
 }
 
-func tunnelStatusLabel(name string) string {
-	if _, running, _ := tunnelstate.Get(name); running {
+func tunnelStatusLabel(status string) string {
+	if status == "running" {
 		return tunnelRunningStatusStyle.Render("● running")
 	}
-	return tunnelStoppedStatusStyle.Render("○ stopped")
+	if status == "stopped" {
+		return tunnelStoppedStatusStyle.Render("○ stopped")
+	}
+	if status == "" {
+		status = "checking"
+	}
+	return mutedStyle.Render("◌ " + status)
 }
 
 func fitRow(value string, width int) string {
