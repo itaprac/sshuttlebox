@@ -1,1264 +1,482 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="sshuttlebox is a small SSH host, SFTP, and tunnel manager for your terminal." />
-    <meta name="color-scheme" content="dark" />
-    <title>sshuttlebox · SSH hosts and tunnels, kept tidy</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
-    <style>
-      :root {
-        --bg: #0b0d10;
-        --bg-2: #111418;
-        --panel: #13171c;
-        --panel-2: #181d23;
-        --border: #232a31;
-        --border-soft: #1a2026;
-        --text: #e6edf3;
-        --text-soft: #b4bdc6;
-        --muted: #7d8590;
-        --dim: #545d66;
-        --accent: #6ee7b7;
-        --accent-soft: #34d399;
-        --blue: #79b8ff;
-        --yellow: #f0c674;
-        --magenta: #d6acff;
-        --red: #ff7b72;
-        --shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 8px 32px rgba(0, 0, 0, 0.5);
-        --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-        --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      html {
-        scroll-padding-top: 24px;
-      }
-
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-      }
-
-      body {
-        background: var(--bg);
-        color: var(--text);
-        font-family: var(--sans);
-        font-size: 15px;
-        line-height: 1.6;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-        background-image:
-          radial-gradient(900px 500px at 80% -10%, rgba(110, 231, 183, 0.06), transparent 60%),
-          radial-gradient(700px 400px at -10% 10%, rgba(121, 184, 255, 0.05), transparent 60%);
-        background-attachment: fixed;
-      }
-
-      .wrap {
-        max-width: 1140px;
-        margin: 0 auto;
-        padding: 28px 24px 64px;
-      }
-
-      /* Nav */
-      header.nav {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        margin-bottom: 56px;
-      }
-
-      .brand {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-family: var(--mono);
-        font-weight: 600;
-        font-size: 15px;
-        letter-spacing: -0.01em;
-      }
-
-      .brand .dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 2px;
-        background: var(--accent);
-        box-shadow: 0 0 12px rgba(110, 231, 183, 0.6);
-      }
-
-      .brand .slash {
-        color: var(--dim);
-      }
-
-      .nav-links {
-        display: flex;
-        gap: 22px;
-        align-items: center;
-        font-size: 14px;
-      }
-
-      .nav-links a {
-        color: var(--text-soft);
-        text-decoration: none;
-        transition: color 0.15s ease;
-      }
-
-      .nav-links a:hover {
-        color: var(--text);
-      }
-
-      .gh {
-        display: inline-flex;
-        align-items: center;
-        gap: 7px;
-        padding: 6px 12px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: var(--panel);
-        transition: border-color 0.15s ease, background 0.15s ease;
-      }
-
-      .gh:hover {
-        border-color: #2f3942;
-        background: var(--panel-2);
-      }
-
-      .gh svg {
-        width: 15px;
-        height: 15px;
-      }
-
-      /* Hero */
-      .hero {
-        margin-bottom: 96px;
-      }
-
-      .hero-top {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 500px);
-        gap: 36px;
-        align-items: center;
-        margin-bottom: 64px;
-      }
-
-      section + section {
-        margin-top: 96px;
-      }
-
-      .hero-text {
-        min-width: 0;
-      }
-
-      .eyebrow {
-        display: inline-block;
-        font-family: var(--mono);
-        font-size: 12px;
-        color: var(--accent-soft);
-        background: rgba(52, 211, 153, 0.08);
-        border: 1px solid rgba(52, 211, 153, 0.18);
-        padding: 4px 10px;
-        border-radius: 999px;
-        margin-bottom: 18px;
-      }
-
-      h1 {
-        font-size: clamp(32px, 5vw, 46px);
-        line-height: 1.12;
-        letter-spacing: -0.02em;
-        margin: 0 0 18px;
-        font-weight: 600;
-      }
-
-      h1 .accent {
-        color: var(--accent);
-      }
-
-      .lede {
-        font-size: 18px;
-        line-height: 1.55;
-        color: var(--text-soft);
-        max-width: 620px;
-        margin: 0 0 28px;
-      }
-
-      .install {
-        display: flex;
-        align-items: stretch;
-        gap: 0;
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        width: 100%;
-        min-width: 0;
-        overflow: hidden;
-        font-family: var(--mono);
-        font-size: 14px;
-        color: var(--text);
-        text-align: left;
-        padding: 0;
-        cursor: pointer;
-        transition: border-color 0.15s ease, background 0.15s ease;
-        position: relative;
-      }
-
-      .install:hover {
-        background: var(--panel-2);
-        border-color: var(--border);
-      }
-
-      .install:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 2px;
-      }
-
-      .install .prompt {
-        padding: 12px 14px;
-        color: var(--accent);
-        border-right: 1px solid var(--border-soft);
-        user-select: none;
-      }
-
-      .install code {
-        flex: 1;
-        min-width: 0;
-        padding: 12px 14px;
-        color: var(--text);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        font-family: var(--mono);
-        font-size: 14px;
-      }
-
-      .install::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        border-radius: 8px;
-        border: 1px solid var(--accent-soft);
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.2s ease;
-      }
-
-      .install.copied::after {
-        opacity: 1;
-      }
-
-      .install .copied-flash {
-        position: absolute;
-        top: 50%;
-        right: 14px;
-        transform: translateY(-50%);
-        color: var(--accent);
-        font-family: var(--mono);
-        font-size: 12px;
-        letter-spacing: 0.02em;
-        background: var(--panel);
-        padding: 2px 6px;
-        border-radius: 4px;
-        opacity: 0;
-        transition: opacity 0.2s ease;
-        pointer-events: none;
-      }
-
-      .install.copied .copied-flash {
-        opacity: 1;
-      }
-
-      .install.copied {
-        border-color: var(--accent-soft);
-      }
-
-      /* Terminal */
-      .term {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        box-shadow: var(--shadow);
-        overflow: hidden;
-      }
-
-      .tui-block {
-        display: grid;
-        grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-        gap: 48px;
-        align-items: center;
-        margin-top: 64px;
-        padding-top: 64px;
-        border-top: 1px solid var(--border-soft);
-      }
-
-      .tui-copy h3 {
-        font-family: var(--mono);
-        font-size: 12px;
-        font-weight: 500;
-        color: var(--accent);
-        text-transform: none;
-        letter-spacing: 0;
-        margin: 0 0 14px;
-      }
-
-      .tui-copy h2 {
-        font-size: 26px;
-        line-height: 1.2;
-        letter-spacing: -0.01em;
-        margin: 0 0 16px;
-        font-weight: 600;
-        color: var(--text);
-      }
-
-      .tui-copy p {
-        font-size: 15px;
-        line-height: 1.6;
-        color: var(--text-soft);
-        margin: 0;
-      }
-
-      .term-tui {
-        margin-top: 0;
-      }
-
-      .term-cli {
-        width: 100%;
-      }
-
-      .term-cli .term-body {
-        padding: 14px 18px;
-        font-size: 12px;
-        line-height: 1.7;
-      }
-
-      .term-cli .line {
-        display: block;
-        white-space: nowrap;
-      }
-
-      .term-cli .prompt {
-        color: var(--accent);
-        margin-right: 8px;
-      }
-
-      .term-cli .ok {
-        color: var(--accent-soft);
-        margin-right: 6px;
-      }
-
-      .term-cli .arg {
-        color: var(--blue);
-      }
-
-      .term-cli .flag {
-        color: var(--magenta);
-      }
-
-      .term-cli .str {
-        color: var(--accent);
-      }
-
-      .term-cli .dim {
-        color: var(--muted);
-      }
-
-      .term-cli .cursor {
-        display: inline-block;
-        width: 7px;
-        height: 13px;
-        background: var(--text-soft);
-        vertical-align: -2px;
-        margin-left: 2px;
-        animation: blink 1.1s steps(1) infinite;
-      }
-
-      @keyframes blink {
-        50% {
-          opacity: 0;
-        }
-      }
-
-      .term-bar {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 14px;
-        background: var(--bg-2);
-        border-bottom: 1px solid var(--border-soft);
-      }
-
-      .term-bar .lights {
-        display: flex;
-        gap: 6px;
-      }
-
-      .term-bar .light {
-        width: 11px;
-        height: 11px;
-        border-radius: 50%;
-        background: #3a4047;
-      }
-
-      .term-bar .light.r {
-        background: #ff5f57;
-      }
-      .term-bar .light.y {
-        background: #febc2e;
-      }
-      .term-bar .light.g {
-        background: #28c840;
-      }
-
-      .term-bar .title {
-        font-family: var(--mono);
-        font-size: 12px;
-        color: var(--muted);
-        margin-left: auto;
-        margin-right: auto;
-        padding-right: 60px;
-      }
-
-      .term-body {
-        font-family: var(--mono);
-        font-size: 13px;
-        padding: 18px 20px;
-        color: var(--text-soft);
-        line-height: 1.55;
-        overflow-x: auto;
-      }
-
-      .tui {
-        display: grid;
-        grid-template-columns: 200px 1fr;
-        gap: 0;
-        background: var(--bg);
-        border: 1px solid var(--border-soft);
-        border-radius: 6px;
-        min-height: 260px;
-      }
-
-      .tui-side {
-        border-right: 1px solid var(--border-soft);
-        padding: 10px 0;
-      }
-
-      .tui-section {
-        font-size: 11px;
-        text-transform: none;
-        letter-spacing: 0;
-        color: var(--dim);
-        padding: 6px 14px 4px;
-      }
-
-      .tui-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 4px 14px;
-        color: var(--text-soft);
-      }
-
-      .tui-row.active {
-        background: rgba(110, 231, 183, 0.08);
-        color: var(--text);
-        border-left: 2px solid var(--accent);
-        padding-left: 12px;
-      }
-
-      .tui-row .badge {
-        font-size: 10px;
-        color: var(--dim);
-      }
-
-      .tui-row .on {
-        color: var(--accent-soft);
-      }
-
-      .tui-row .off {
-        color: var(--dim);
-      }
-
-      .tui-main {
-        padding: 12px 16px;
-      }
-
-      .tui-main h4 {
-        margin: 0 0 8px;
-        font-family: var(--mono);
-        font-size: 12px;
-        font-weight: 500;
-        color: var(--muted);
-        text-transform: none;
-        letter-spacing: 0;
-      }
-
-      .tui-detail {
-        display: grid;
-        grid-template-columns: 88px 1fr;
-        row-gap: 4px;
-        font-size: 12.5px;
-      }
-
-      .tui-detail dt {
-        color: var(--muted);
-      }
-
-      .tui-detail dd {
-        margin: 0;
-        color: var(--text);
-      }
-
-      .tui-detail dd .v {
-        color: var(--blue);
-      }
-
-      .tui-status {
-        display: flex;
-        justify-content: space-between;
-        padding: 8px 14px;
-        background: var(--bg-2);
-        border-top: 1px solid var(--border-soft);
-        font-family: var(--mono);
-        font-size: 11.5px;
-        color: var(--muted);
-      }
-
-      .tui-status .keys span {
-        color: var(--text-soft);
-        margin-right: 10px;
-      }
-
-      .tui-status .keys b {
-        color: var(--accent);
-        font-weight: 500;
-      }
-
-      .c-green {
-        color: var(--accent);
-      }
-      .c-blue {
-        color: var(--blue);
-      }
-      .c-yellow {
-        color: var(--yellow);
-      }
-      .c-magenta {
-        color: var(--magenta);
-      }
-      .c-muted {
-        color: var(--muted);
-      }
-      .c-dim {
-        color: var(--dim);
-      }
-
-      /* Sections */
-      section {
-        margin-top: 64px;
-      }
-
-      .section-title {
-        display: flex;
-        align-items: baseline;
-        gap: 10px;
-        margin-bottom: 32px;
-      }
-
-      .section-title h2 {
-        font-size: 13px;
-        font-family: var(--mono);
-        font-weight: 500;
-        color: var(--muted);
-        text-transform: none;
-        letter-spacing: 0;
-        margin: 0;
-      }
-
-      .section-title .line {
-        flex: 1;
-        height: 1px;
-        background: var(--border-soft);
-      }
-
-      /* Features */
-      .features {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 1px;
-        background: var(--border-soft);
-        border: 1px solid var(--border-soft);
-        border-radius: 8px;
-        overflow: hidden;
-      }
-
-      .feature {
-        background: var(--panel);
-        padding: 20px;
-      }
-
-      .feature .icon {
-        font-family: var(--mono);
-        font-size: 16px;
-        color: var(--accent);
-        line-height: 1;
-        margin-bottom: 10px;
-      }
-
-      .feature .name {
-        font-family: var(--mono);
-        font-size: 13px;
-        color: var(--accent);
-        margin-bottom: 6px;
-      }
-
-      .feature .desc {
-        font-size: 14px;
-        color: var(--text-soft);
-        line-height: 1.5;
-      }
-
-      /* Commands */
-      .commands-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 16px;
-      }
-
-      .command-group {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 20px 22px;
-      }
-
-      .command-group h3 {
-        font-family: var(--mono);
-        font-size: 11px;
-        font-weight: 500;
-        color: var(--muted);
-        text-transform: none;
-        letter-spacing: 0.1em;
-        margin: 0 0 14px;
-      }
-
-      .command-row {
-        display: grid;
-        grid-template-columns: 1fr;
-        padding: 8px 0;
-        border-top: 1px solid var(--border-soft);
-      }
-
-      .command-row:first-of-type {
-        border-top: 0;
-        padding-top: 4px;
-      }
-
-      .command-row code {
-        font-family: var(--mono);
-        font-size: 13px;
-        color: var(--text);
-        background: transparent;
-        padding: 0;
-      }
-
-      .command-row .desc {
-        font-size: 12.5px;
-        color: var(--muted);
-        margin-top: 4px;
-        line-height: 1.4;
-      }
-
-      .command-row code .arg {
-        color: var(--blue);
-      }
-
-      .command-row code .flag {
-        color: var(--magenta);
-      }
-
-      @media (max-width: 880px) {
-        .commands-grid {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* Quick start */
-      .qs {
-        display: flex;
-        flex-direction: column;
-        gap: 20px;
-      }
-
-      .qs .step {
-        display: grid;
-        grid-template-columns: 40px 1fr;
-        gap: 20px;
-        align-items: start;
-      }
-
-      .qs .n {
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        border: 1px solid var(--border);
-        background: var(--panel);
-        color: var(--accent);
-        font-family: var(--mono);
-        font-size: 13px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        line-height: 1;
-        margin-top: 4px;
-      }
-
-      .qs .step-body {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        min-width: 0;
-      }
-
-      .qs .label {
-        color: var(--text-soft);
-        font-size: 15px;
-        line-height: 1.4;
-      }
-
-      .qs .code {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 14px 18px;
-        font-family: var(--mono);
-        font-size: 13.5px;
-        line-height: 1.85;
-        color: var(--text);
-        overflow-x: auto;
-      }
-
-      .qs .code .line {
-        display: block;
-        white-space: nowrap;
-      }
-
-      .qs .p {
-        color: var(--accent);
-        user-select: none;
-        margin-right: 8px;
-      }
-
-      .qs .arg {
-        color: var(--blue);
-      }
-
-      .qs .flag {
-        color: var(--magenta);
-      }
-
-      .qs .cmt {
-        color: var(--dim);
-        margin-left: 8px;
-      }
-
-      /* Footer */
-      footer {
-        margin-top: 72px;
-        padding-top: 24px;
-        border-top: 1px solid var(--border-soft);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 16px;
-        flex-wrap: wrap;
-        color: var(--muted);
-        font-size: 13px;
-        text-align: center;
-      }
-
-      footer .config {
-        font-family: var(--mono);
-        font-size: 12px;
-      }
-
-      footer a {
-        color: var(--text-soft);
-        text-decoration: none;
-      }
-
-      footer a:hover {
-        color: var(--text);
-      }
-
-      @media (max-width: 880px) {
-        .features {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        .hero-top {
-          grid-template-columns: 1fr;
-          gap: 24px;
-        }
-        .tui-block {
-          grid-template-columns: 1fr !important;
-          gap: 24px;
-        }
-      }
-
-      @media (max-width: 640px) {
-        .wrap {
-          padding: 20px 16px 48px;
-        }
-        header.nav {
-          margin-bottom: 40px;
-        }
-        .nav-links a:not(.gh) {
-          display: none;
-        }
-        .tui {
-          grid-template-columns: 1fr;
-        }
-        .tui-side {
-          border-right: 0;
-          border-bottom: 1px solid var(--border-soft);
-        }
-        .features {
-          grid-template-columns: 1fr;
-        }
-        .install code {
-          font-size: 12.5px;
-        }
-        footer {
-          flex-direction: column;
-          align-items: flex-start;
-        }
-      }
-    </style>
-    <link rel="stylesheet" href="assets/site.css?v=0a34c49d3ad1" />
-  </head>
-  <body class="site">
-    <a class="site-skip" href="#main">Skip to content</a>
-    <div class="wrap">
-      <header class="nav">
-        <div class="brand">
-          <span class="dot" aria-hidden="true"></span>
-          <span>sshuttlebox</span>
-          <span class="slash">/</span>
-          <span style="color: var(--muted); font-weight: 400">shbx</span>
-        </div>
-        <nav class="nav-links">
-          <a href="#features">Features</a>
-          <a href="#commands">Commands</a>
-          <a href="#quickstart">Quick start</a>
-          <a
-            class="gh"
-            href="https://github.com/itaprac/sshuttlebox"
-            target="_blank"
-            rel="noopener"
-          >
-            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <path
-                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"
-              />
-            </svg>
-            <span>GitHub</span>
-          </a>
-        </nav>
-      </header>
-
-      <main id="main">
-      <section class="hero">
-        <div class="hero-top">
-          <div class="hero-text">
-            <h1>
-              SSH hosts and tunnels,<br />
-              <span class="accent">kept tidy.</span>
-            </h1>
-            <p class="lede">
-              A compact terminal manager for the SSH targets you actually use. Save hosts under short
-              names, open SFTP sessions, move files, run local/remote/SOCKS tunnels, and connect with
-              one command, or browse everything from an interactive TUI.
-            </p>
-
-            <button type="button" class="install" id="install" aria-label="Copy install command">
-              <span class="prompt" aria-hidden="true">$</span>
-              <code id="install-cmd">go install github.com/itaprac/sshuttlebox/cmd/shbx@latest</code>
-              <span class="copied-flash" aria-hidden="true">✓ Copied</span>
-            </button>
-          </div>
-
-          <div class="term term-cli" aria-label="shbx CLI preview">
-            <div class="term-bar">
-              <div class="lights" aria-hidden="true">
-                <span class="light r"></span>
-                <span class="light y"></span>
-                <span class="light g"></span>
-              </div>
-              <div class="title">zsh · shbx</div>
-            </div>
-            <div class="term-body">
-              <span class="line"><span class="prompt">❯</span>shbx config init</span>
-              <span class="line"><span class="ok">✓</span>Created config: <span class="dim">~/.config/sshuttlebox/config.json</span></span>
-              <span class="line"><span class="prompt">❯</span>shbx add <span class="arg">prod</span> <span class="flag">--host</span> 192.0.2.10 <span class="flag">--user</span> deploy</span>
-              <span class="line"><span class="ok">✓</span>Host <span class="str">"prod"</span> saved</span>
-              <span class="line"><span class="prompt">❯</span>shbx connect <span class="arg">prod</span> <span class="flag">--dry-run</span></span>
-              <span class="line"><span class="dim">ssh -p 22 deploy@192.0.2.10</span></span>
-              <span class="line"><span class="prompt">❯</span>shbx sftp ls <span class="arg">prod</span> <span class="str">/var/www</span></span>
-              <span class="line"><span class="dim">drwxr-xr-x deploy deploy releases</span></span>
-              <span class="line"><span class="prompt">❯</span><span class="cursor"></span></span>
-            </div>
-          </div>
-        </div>
-
-        <div class="site-tui-layout">
-<figure id="try" class="static-tui" aria-label="sshuttlebox terminal interface with sample hosts and tunnels">
-          <div class="terminal">
-            <div class="terminal-title"><span>shbx · Terminal UI</span><span>Sample configuration</span></div>
-            <div class="terminal-screen">
-              <pre class="terminal-output terminal-wide"><span class="tui-rule">┌────────────────────────────────────────────────────────────────────────────────────────────────────────────┐</span>
-<span class="tui-rule">│</span><span class="tui-accent tui-bold">▣</span>  <span class="tui-accent tui-bold">sshuttlebox</span>  <span class="tui-muted">v0.3.4</span><span class="tui-rule"> · </span><span class="tui-muted">3 hosts  ·  2 tunnels</span>                         <span class="tui-muted">SSH hosts &amp; tunnels, in your terminal</span><span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-rule">────────────────────────────────────────────────────────────────────────────────────────────────────────────</span><span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-accent tui-bold">HOSTS 3                             </span> <span class="tui-rule">│</span> <span class="tui-label tui-bold">DETAILS                                                              </span><span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-label tui-bold">work</span>                                 <span class="tui-rule">│</span> <span class="tui-accent tui-bold">prod</span>                                                                 <span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-selected-text tui-selected">&gt; prod  </span><span class="tui-selected-text tui-selected">deploy@192.0.2.10:22</span>         <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>  staging  <span class="tui-muted">deploy@198.51.100.5:2222</span>  <span class="tui-rule">│</span> <span class="tui-label">Host: </span>192.0.2.10                                                     <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span> <span class="tui-label">User: </span>deploy                                                         <span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-label tui-bold">ungrouped</span>                            <span class="tui-rule">│</span> <span class="tui-label">Port: </span>22                                                             <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>  lab  <span class="tui-muted">dev@203.0.113.20:22</span>           <span class="tui-rule">│</span> <span class="tui-label">Identity file: </span>/home/demo/.ssh/id_ed25519                            <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span> <span class="tui-label">OpenSSH config: </span>-                                                    <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span> <span class="tui-label">Group: </span>work                                                          <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span> <span class="tui-label">Password: </span>-                                                          <span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-rule">────────────────────────────────────</span> <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-label tui-bold">TUNNELS 2                           </span> <span class="tui-rule">│</span> <span class="tui-muted">ssh -p 22 -i /home/demo/.ssh/id_ed25519 deploy@192.0.2.10</span>            <span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-label tui-bold">work</span>                                 <span class="tui-rule">│</span> <span class="tui-muted">sftp -P 22 -i /home/demo/.ssh/id_ed25519 deploy@192.0.2.10</span>           <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>  db  <span class="tui-muted">○ stopped</span>  127.0.0.1:5432 -... <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>  socks  <span class="tui-muted">○ stopped</span>  SOCKS 127.0.0... <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                     <span class="tui-rule">│</span>                                                                      <span class="tui-rule">│</span>
-<span class="tui-rule">└────────────────────────────────────────────────────────────────────────────────────────────────────────────┘</span>
-
-<span class="tui-muted">Ready.</span>
-<span class="tui-muted">enter/c</span> <span class="tui-muted">connect</span><span class="tui-muted"> • </span><span class="tui-muted">s</span> <span class="tui-muted">sftp</span><span class="tui-muted"> • </span><span class="tui-muted">p</span> <span class="tui-muted">print</span><span class="tui-muted"> • </span><span class="tui-muted">a</span> <span class="tui-muted">add</span><span class="tui-muted"> • </span><span class="tui-muted">e</span> <span class="tui-muted">edit</span><span class="tui-muted"> • </span><span class="tui-muted">r</span> <span class="tui-muted">remove</span><span class="tui-muted"> • </span><span class="tui-muted">tab</span> <span class="tui-muted">hosts/tunnels</span><span class="tui-muted"> • </span><span class="tui-muted">/</span> <span class="tui-muted">filter</span><span class="tui-muted"> • </span><span class="tui-muted">d</span> <span class="tui-muted">details</span> <span class="tui-muted">…</span>   </pre>
-              <pre class="terminal-output terminal-compact"><span class="tui-rule">┌──────────────────────────────────────────────┐</span>
-<span class="tui-rule">│</span><span class="tui-accent tui-bold">▣</span>  <span class="tui-accent tui-bold">sshuttlebox</span><span class="tui-rule"> · </span><span class="tui-muted">3 hosts  ·  2 tunnels</span>        <span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-rule">──────────────────────────────────────────────</span><span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-accent tui-bold">HOSTS 3                                       </span><span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-label tui-bold">work</span>                                          <span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-selected-text tui-selected">&gt; prod  </span><span class="tui-selected-text tui-selected">deploy@192.0.2.10:22</span>                  <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>  staging  <span class="tui-muted">deploy@198.51.100.5:2222</span>           <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span><span class="tui-label tui-bold">ungrouped</span>                                     <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>  lab  <span class="tui-muted">dev@203.0.113.20:22</span>                    <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">│</span>                                              <span class="tui-rule">│</span>
-<span class="tui-rule">└──────────────────────────────────────────────┘</span>
-
-<span class="tui-muted">Ready.</span>
-<span class="tui-muted">enter/c</span> <span class="tui-muted">connect</span><span class="tui-muted"> • </span><span class="tui-muted">s</span> <span class="tui-muted">sftp</span><span class="tui-muted"> • </span><span class="tui-muted">p</span> <span class="tui-muted">print</span><span class="tui-muted"> • </span><span class="tui-muted">a</span> <span class="tui-muted">add</span> <span class="tui-muted">…</span>    </pre>
-            </div>
-          </div>
-          <figcaption>The TUI with example hosts and tunnels.</figcaption>
-        </figure>
-<div class="site-tui-intro">
-          <div>
-            <h2>Your hosts, in one terminal.</h2>
-            <p>Run <code>shbx</code> to browse hosts and tunnels. Select a host, print its SSH command, or find an action in the command palette.</p>
-          </div>
-        </div>
-        </div>
-      </section>
-
-      <section id="features">
-        <div class="section-title">
-          <h2>Features</h2>
-          <span class="line"></span>
-        </div>
-        <div class="features">
-          <div class="feature">
-            <div class="icon">&gt;_</div>
-            <div class="name">Saved hosts</div>
-            <div class="desc">Connect to any SSH target by a short name. No more memorizing IPs, ports, and key paths.</div>
-          </div>
-          <div class="feature">
-            <div class="icon">◫</div>
-            <div class="name">Interactive TUI</div>
-            <div class="desc">Browse, filter, connect, and edit hosts from a terminal UI with a command palette.</div>
-          </div>
-          <div class="feature">
-            <div class="icon">⇄</div>
-            <div class="name">Tunnels</div>
-            <div class="desc">Local, remote, and SOCKS port forwarding with start/stop lifecycle management.</div>
-          </div>
-          <div class="feature">
-            <div class="icon">⇅</div>
-            <div class="name">SFTP helpers</div>
-            <div class="desc">Open saved hosts with SFTP, list remote paths, and move files with get/put commands.</div>
-          </div>
-          <div class="feature">
-            <div class="icon">$?</div>
-            <div class="name">Dry-run preview</div>
-            <div class="desc">Print the exact SSH, SFTP, or tunnel command before running it.</div>
-          </div>
-          <div class="feature">
-            <div class="icon">⊞</div>
-            <div class="name">Groups</div>
-            <div class="desc">Organize related hosts and tunnels into named groups for quick filtering.</div>
-          </div>
-          <div class="feature">
-            <div class="icon">⟳</div>
-            <div class="name">Shell completion</div>
-            <div class="desc">Bash, zsh, and fish completion for all saved host and tunnel names.</div>
-          </div>
-          <div class="feature">
-            <div class="icon">⚕</div>
-            <div class="name">Doctor checks</div>
-            <div class="desc">Inspect config, SSH availability, keys, and tunnel state with a single command.</div>
-          </div>
-          <div class="feature">
-            <div class="icon">••</div>
-            <div class="name">Password auth</div>
-            <div class="desc">Keys stay preferred, but saved passwords are available for hosts that need them.</div>
-          </div>
-        </div>
-      </section>
-
-      <section id="commands">
-        <div class="section-title">
-          <h2>Commands</h2>
-          <span class="line"></span>
-        </div>
-        <div class="commands-grid">
-          <div class="command-group">
-            <h3>Hosts</h3>
-            <div class="command-row">
-              <code>shbx add <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Save a new SSH host</span>
-            </div>
-            <div class="command-row">
-              <code>shbx list</code>
-              <span class="desc">List all saved hosts</span>
-            </div>
-            <div class="command-row">
-              <code>shbx connect <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Open an SSH session</span>
-            </div>
-            <div class="command-row">
-              <code>shbx sftp <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Open an SFTP session</span>
-            </div>
-            <div class="command-row">
-              <code>shbx sftp get <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Download from a saved host</span>
-            </div>
-            <div class="command-row">
-              <code>shbx edit <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Update a host's fields</span>
-            </div>
-            <div class="command-row">
-              <code>shbx remove <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Delete a saved host</span>
-            </div>
-          </div>
-
-          <div class="command-group">
-            <h3>Tunnels</h3>
-            <div class="command-row">
-              <code>shbx tunnel add <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Define a new tunnel</span>
-            </div>
-            <div class="command-row">
-              <code>shbx tunnel list</code>
-              <span class="desc">List defined tunnels</span>
-            </div>
-            <div class="command-row">
-              <code>shbx tunnel start <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Bring a tunnel up</span>
-            </div>
-            <div class="command-row">
-              <code>shbx tunnel stop <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Tear a tunnel down</span>
-            </div>
-            <div class="command-row">
-              <code>shbx tunnel remove <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Delete a tunnel</span>
-            </div>
-          </div>
-
-          <div class="command-group">
-            <h3>Config &amp; groups</h3>
-            <div class="command-row">
-              <code>shbx config init</code>
-              <span class="desc">Create the local config</span>
-            </div>
-            <div class="command-row">
-              <code>shbx group add <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Create a named group</span>
-            </div>
-            <div class="command-row">
-              <code>shbx group show <span class="arg">&lt;name&gt;</span></code>
-              <span class="desc">Show group contents</span>
-            </div>
-            <div class="command-row">
-              <code>shbx doctor</code>
-              <span class="desc">Check config and SSH state</span>
-            </div>
-            <div class="command-row">
-              <code>shbx doctor --fix</code>
-              <span class="desc">Apply safe local repairs</span>
-            </div>
-            <div class="command-row">
-              <code>shbx completion install</code>
-              <span class="desc">Install shell completion</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="quickstart">
-        <div class="section-title">
-          <h2>Quick start</h2>
-          <span class="line"></span>
-        </div>
-        <div class="qs">
-          <div class="step">
-            <span class="n">1</span>
-            <div class="step-body">
-              <div class="label">Install the binary</div>
-              <div class="code">
-                <span class="line"><span class="p">$</span>go install github.com/itaprac/sshuttlebox/cmd/shbx@latest</span>
-              </div>
-            </div>
-          </div>
-          <div class="step">
-            <span class="n">2</span>
-            <div class="step-body">
-              <div class="label">Initialize config and add a host</div>
-              <div class="code">
-                <span class="line"><span class="p">$</span>shbx config init</span>
-                <span class="line"><span class="p">$</span>shbx add <span class="arg">prod</span> <span class="flag">--host</span> 192.0.2.10 <span class="flag">--user</span> deploy</span>
-              </div>
-            </div>
-          </div>
-          <div class="step">
-            <span class="n">3</span>
-            <div class="step-body">
-              <div class="label">Connect, open SFTP, or launch the TUI</div>
-              <div class="code">
-                <span class="line"><span class="p">$</span>shbx connect <span class="arg">prod</span></span>
-                <span class="line"><span class="p">$</span>shbx sftp <span class="arg">prod</span></span>
-                <span class="line"><span class="p">$</span>shbx</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      </main>
-      <footer>
-        <span>
-          MIT licensed ·
-          <a href="https://github.com/itaprac/sshuttlebox" target="_blank" rel="noopener"
-            >itaprac/sshuttlebox</a
-          >
-        </span>
-      </footer>
+<html lang="en" data-type="software" data-radius="sharp" data-ground="sand" data-buttons="arrow" data-motion>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>sshuttlebox: SSH host and tunnel manager for the terminal</title>
+<meta name="description" content="shbx saves your servers under short names, then connects, starts port forwards and moves files with one command or from a keyboard-driven terminal UI. Free, MIT, macOS and Linux.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="sshuttlebox: SSH host and tunnel manager for the terminal">
+<meta property="og:description" content="Save servers under short names, then connect, forward ports and move files with one command.">
+<meta property="og:image" content="https://itaprac.github.io/sshuttlebox/share.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#18191b">
+<link rel="canonical" href="https://itaprac.github.io/sshuttlebox/">
+<meta name="site-kind" content="software">
+<meta name="page-type" content="software">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/system.css">
+<link rel="stylesheet" href="assets/ui/cards.css">
+<link rel="stylesheet" href="assets/motion/motion.css">
+<link rel="stylesheet" href="assets/backgrounds/backgrounds.css">
+<link rel="stylesheet" href="assets/layout/layout.css">
+<link rel="stylesheet" href="assets/icons/icon.css">
+<style>
+:root {
+  --p-bg: #18191b; --p-surface: #222427; --p-ink: #eff0f1; --p-muted: #9c9ea3;
+  --p-accent: #ff4a1f; --p-accent-ink: #18191b; --p-action: #ff4a1f; --p-action-ink: #18191b;
+  --p-inv-bg: #eff0f1; --p-inv-surface: #dedfe0; --p-inv-ink: #18191b; --p-inv-muted: #5b5c5e;
+  --p-inv-accent: #18191b; --p-inv-accent-ink: #eff0f1; --p-inv-action: #18191b; --p-inv-action-ink: #eff0f1;
+  --font-display: "Geist", system-ui, sans-serif;
+  --font-text: "Geist", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --display-weight: 500;
+  --display-tracking: -0.035em;
+  --display-tracking-xl: -0.045em;
+}
+</style>
+<link rel="stylesheet" href="assets/ui/base.css">
+<link rel="stylesheet" href="assets/ui/terminal-run/fragment.css">
+<script>document.documentElement.classList.add('m-enter');setTimeout(()=>document.documentElement.classList.add('m-enter-done'),700)</script>
+<script src="assets/backgrounds/backgrounds.js"></script>
+<script>document.documentElement.classList.add('mo-js');setTimeout(()=>document.documentElement.classList.add('mo-safe'),2500)</script>
+<link rel="modulepreload" href="assets/moments/moments.js">
+<link rel="modulepreload" href="assets/moments/lib.js">
+<link rel="modulepreload" href="assets/moments/pinned-chapters/moment.js">
+<!-- page CSS: only inside the visuals (the shbx terminal windows), one --p-h for the card group, the close's name size -->
+<style>
+  .hero--centred .hero__lead { color: var(--ink); }
+  /* the hero ground's pause disc sits on the light sand: its focus ring takes the dark ink to read there */
+  .hero__window .loop-pause:focus-visible { outline-color: #18191b; }
+  /* every drawn terminal is the dark shbx window on the lit sand ground */
+  .term-dark { --fx-bg: #121315; --fx-surface: #1b1c1f; --fx-ink: #eff0f1; --fx-muted: #8e9196; --fx-accent: #ff4a1f; --fx-accent-ink: #121315; --ui-mono: var(--font-mono); --ui-font: var(--font-text); }
+  .ui-term.term-dark { width: 100%; }
+  .term-wrap .ui-term__track { padding: 12px 0 16px; }
+  .ui-term .t-ok { color: color-mix(in oklab, oklch(0.72 0.15 150) 84%, #eff0f1); }
+  .ui-term .t-warn { color: #f0b45a; }
+  .ui-term .t-hi { color: var(--u-ink); }
+  .ui-term .t-acc { color: var(--u-accent); }
+  .ui-term .t-arg { color: #9cc4f0; }
+  /* a long command wraps onto the next row, as a terminal does, instead of running out of the window */
+  .term-wrap .ui-term__ln { height: auto; min-height: 20px; gap: 0; align-items: flex-start; white-space: pre-wrap; }
+  .term-wrap .ui-term__ln > * { flex: 0 1 auto; overflow: visible; overflow-wrap: anywhere; }
+  .term-wrap .ui-term__ln > .ui-term__sig { flex: none; }
+
+  /* the shbx TUI in the hero: the host list beside the open host, the key line under them */
+  .tui { font: 13px/20px var(--font-mono); }
+  .tui__body { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 300px; }
+  .tui__side { border-right: 1px solid var(--u-line); padding: 12px 0; }
+  .tui__sec { padding: 4px 16px; color: var(--u-muted); }
+  .tui__sec + .tui__row { margin-top: 2px; }
+  .tui__row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 16px; color: var(--u-text-2); white-space: nowrap; }
+  .tui__row.is-on { background: color-mix(in oklab, var(--u-accent) 16%, var(--u-bg)); color: var(--u-ink); box-shadow: inset 2px 0 var(--u-accent); }
+  .tui__row span + span { color: var(--u-muted); }
+  .tui__row .is-up { color: color-mix(in oklab, oklch(0.72 0.15 150) 84%, #eff0f1); }
+  .tui__gap { height: 12px; }
+  .tui__main { padding: 16px 20px; min-width: 0; display: grid; align-content: start; gap: 12px; }
+  .tui__title { color: var(--u-ink); }
+  .tui__dl { display: grid; grid-template-columns: 96px minmax(0, 1fr); margin: 0; }
+  .tui__dl dt { color: var(--u-muted); }
+  .tui__dl dd { margin: 0; color: var(--u-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tui__cmd { padding: 8px 12px; border: 1px solid var(--u-line-2); border-radius: 6px; color: var(--u-text-2); overflow-wrap: anywhere; }
+  .tui__cmd b { font-weight: 400; color: var(--u-muted); }
+  .tui__keys { display: flex; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--u-line); color: var(--u-muted); white-space: nowrap; overflow: hidden; }
+  .tui__keys b { font-weight: 400; color: var(--u-ink); }
+  @media (max-width: 639px) {
+    .tui__body { grid-template-columns: 1fr; }
+    .tui__side { display: none; }
+    .tui__keys span:nth-child(n+4) { display: none; }
+  }
+
+  /* the chapters' visuals: one terminal each on the lit ground */
+  #how .mo-pc__visual--lit .ui-term { width: min(100%, 560px); }
+
+  /* the card group: one panel height, the terminal set in from the panel's corner */
+  #features .panel { --p-h: 344px; }
+  #features .stage > .at-rise { --fit-max: 440px; --ax: 24px; --ay: 32px; }
+  @media (max-width: 639px) { #features .panel { --p-h: 290px; } #how .mo-pc__visual.mo-pc__visual--lit { aspect-ratio: 10 / 9; } #install .frame--lit { min-height: 560px; } }
+  /* 1024 to 1279: the kit sets panel cards two-up, so the third card takes the whole row and the group two screens */
+  @media (min-width: 1024px) and (max-width: 1279px) { #features { --h: 2; } #features .grid > .card:nth-child(3) { grid-column: 1 / -1; } }
+  @media (min-width: 640px) and (max-width: 1023px) { #features { --h: 2; } }
+  /* a phone: the chapters at rest are two screens, so the next section never shows in their second tile */
+  @media (min-width: 640px) and (max-width: 1023px) {
+    #features .panel { --p-h: calc(64svh - 216px); }
+    #how .mo-pc__visual.mo-pc__visual--lit { aspect-ratio: auto; min-height: calc(54.6svh - 143px); }
+    /* the questions keep the split on a tablet: the words and the terminal left, the answers right */
+    #faq .grid > .section-head { grid-column: 1 / span 6; }
+    #faq .grid > .faq { grid-column: 7 / span 6; }
+    #faq .faq__frame { min-height: calc(30svh + 236px); align-items: center; }
+    /* the chapters at rest on a tablet: each terminal under its words, the section two screens */
+    main > #how[data-moment]:not(.is-live) { min-height: calc(2 * 100svh); }
+    #how:not(.is-live) .mo-pc__step { grid-template-columns: minmax(0, 1fr); }
+    #how:not(.is-live) .mo-pc__step .mo-pc__visual { grid-column: 1; grid-row: auto; margin-top: var(--s-4); }
+  }
+  @media (max-width: 639px) { main > #how[data-moment]:not(.is-live) { min-height: calc(2 * 100lvh); } }
+
+  /* the install command and its copy control */
+  .install { display: flex; align-items: center; gap: var(--s-4); font: 15px/1.5 var(--font-mono); min-width: 0; }
+  .install code { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; font: inherit; }
+  @media (max-width: 639px) { .install { flex-direction: column; align-items: stretch; } .install .btn { width: 100%; } }
+  .install .btn { flex: none; }
+  .install__rows { margin-top: var(--s-6); }
+  .install__lead { margin-bottom: var(--s-4); }
+  .install__rows code { font: 14px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+  .faq__frame { display: flex; justify-content: center; margin-top: var(--s-7); padding: var(--s-6); }
+  .faq__frame .ui-term { width: min(100%, 560px); }
+  #install .frame--lit { display: flex; align-items: center; justify-content: center; padding: var(--s-6); }
+  #install .frame--lit .ui-term { width: min(100%, 560px); }
+
+  /* the name across the .wrap: eleven letters, hand-set per breakpoint */
+  .close__word { font-size: clamp(56px, 13.2vw, 196px); line-height: 1; }
+  @media (max-width: 639px) { .close__word { font-size: clamp(44px, 14.4vw, 64px); } }
+</style>
+</head>
+<body>
+<!-- type: software (site-kind software, page type software), a dark page
+     deal: hero centred, nav nav-centre (nav-cards dealt; no photographs, so nav-centre), close close-word,
+           footer footer-dark, rhythm surface-pairs (#features and #install on .ground-surface), buttons arrow,
+           mark wordmark, palette graphite-safety-orange, type geist, radius sharp, ground sand (lit frames),
+           effect grain-gradient held still in the hero frame
+     moments: pinned-chapters in #how -->
+<header class="nav nav--centre">
+  <div class="wrap nav__bar">
+    <a class="skip-link" href="#top">Skip to content</a>
+    <a class="nav__logo" href="#top">sshuttlebox</a>
+    <nav class="nav__links" aria-label="Main">
+      <div class="nav__item"><a class="nav__link" href="#how">Workflow</a></div>
+      <div class="nav__item"><a class="nav__link" href="#features">Features</a></div>
+      <div class="nav__item"><a class="nav__link" href="#install">Install</a></div>
+      <div class="nav__item"><a class="nav__link" href="#faq">Questions</a></div>
+    </nav>
+    <div class="nav__actions">
+      <a class="btn btn--primary" href="#install">Get shbx</a>
     </div>
+    <button class="nav__toggle" type="button" aria-expanded="false" aria-label="Menu">
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 5h14M2 13h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
 
-    <script>
-      (function () {
-        document.querySelectorAll('a[href^="#"]').forEach(function (link) {
-          link.addEventListener("click", function (e) {
-            var id = link.getAttribute("href").slice(1);
-            if (!id) return;
-            var target = document.getElementById(id);
-            if (!target) return;
-            e.preventDefault();
-            var top = target.getBoundingClientRect().top + window.pageYOffset - 24;
-            if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-              window.scrollTo(0, top);
-              history.replaceState(null, "", "#" + id);
-              return;
-            }
-            var start = window.pageYOffset;
-            var distance = top - start;
-            var duration = Math.min(900, Math.max(400, Math.abs(distance) * 0.6));
-            var startTime = null;
-            function ease(t) {
-              return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-            }
-            function step(now) {
-              if (startTime === null) startTime = now;
-              var elapsed = now - startTime;
-              var t = Math.min(elapsed / duration, 1);
-              window.scrollTo(0, start + distance * ease(t));
-              if (t < 1) requestAnimationFrame(step);
-              else history.replaceState(null, "", "#" + id);
-            }
-            requestAnimationFrame(step);
-          });
-        });
-      })();
+<main id="top">
+  <section class="hero hero--centred" data-enter aria-labelledby="hero-h">
+    <div class="wrap"><div class="hero-text">
+      <div class="hero__c">
+        <p class="pill">v0.3.5, MIT licence</p>
+        <h1 id="hero-h">SSH host and tunnel manager</h1>
+        <p class="hero__lead">Save each server under a short name, then connect, forward ports and move files with one command on macOS or Linux, or from a terminal UI.</p>
+        <div class="btn-row"><a class="btn btn--primary" href="#install">Get shbx<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a><a class="btn btn--secondary" href="https://github.com/itaprac/sshuttlebox">See the source</a></div>
+      </div>
+      <div class="hero__window" data-fx="grain-gradient" data-fx-seed="7" data-fx-params='{"speed":0,"grainMotion":0,"grain":0.35,"tint":0.35,"calm":0.6,"calmX":0.5,"calmY":0.3}' role="img" aria-label="The shbx terminal UI: three saved hosts and three tunnels on the left, the host prod open on the right with the ssh command it runs">
+        <div class="ly-piece ui ui-panel tui term-dark" data-visual aria-hidden="true">
+          <div class="ui-term__head"><span class="ui-dots"><i></i><i></i><i></i></span><span class="ui-term__title">shbx</span><span class="ui-meta">zsh</span></div>
+          <div class="tui__body">
+            <div class="tui__side">
+              <div class="tui__sec">Hosts · 3</div>
+              <div class="tui__row is-on"><span>prod</span><span>deploy@</span></div>
+              <div class="tui__row"><span>staging</span><span>deploy@</span></div>
+              <div class="tui__row"><span>jump</span><span>ec2-user@</span></div>
+              <div class="tui__gap"></div>
+              <div class="tui__sec">Tunnels · 3</div>
+              <div class="tui__row"><span>db</span><span class="is-up">running</span></div>
+              <div class="tui__row"><span>socks</span><span>stopped</span></div>
+              <div class="tui__row"><span>grafana</span><span>stopped</span></div>
+            </div>
+            <div class="tui__main">
+              <div class="tui__title">prod</div>
+              <dl class="tui__dl">
+                <dt>Host</dt><dd>192.0.2.10</dd>
+                <dt>User</dt><dd>deploy</dd>
+                <dt>Port</dt><dd>22</dd>
+                <dt>Identity</dt><dd>~/.ssh/id_ed25519</dd>
+                <dt>Group</dt><dd>work</dd>
+              </dl>
+              <div class="tui__cmd"><b>$</b> ssh -p 22 -i ~/.ssh/id_ed25519 -- deploy@192.0.2.10</div>
+            </div>
+          </div>
+          <div class="tui__keys"><span><b>enter</b> connect</span><span><b>s</b> sftp</span><span><b>p</b> print</span><span><b>e</b> edit</span><span><b>/</b> filter</span><span><b>:</b> commands</span></div>
+        </div>
+      </div>
+    </div></div>
+  </section>
 
-      (function () {
-        var btn = document.getElementById("install");
-        var cmd = document.getElementById("install-cmd");
-        if (!btn || !cmd) return;
-        var timer;
-        var feedback = document.createElement("span");
-        feedback.setAttribute("role", "status");
-        feedback.style.display = "block";
-        btn.insertAdjacentElement("afterend", feedback);
-        btn.addEventListener("click", function () {
-          var text = cmd.textContent || "";
-          var done = function () {
-            btn.classList.add("copied");
-            feedback.textContent = "Install command copied.";
-            clearTimeout(timer);
-            timer = setTimeout(function () {
-              btn.classList.remove("copied");
-              feedback.textContent = "";
-            }, 1600);
-          };
-          var failed = function () {
-            clearTimeout(timer);
-            btn.classList.remove("copied");
-            feedback.textContent = "Copy failed. Select the command and copy it manually.";
-          };
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(done, failed);
-          } else {
-            var r = document.createRange();
-            r.selectNode(cmd);
-            var sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(r);
-            try {
-              if (document.execCommand("copy")) done();
-              else failed();
-            } catch (e) { failed(); }
-            sel.removeAllRanges();
-          }
-        });
-      })();
-    </script>
-  </body>
+  <!-- pinned-chapters (references/moments.md): the section is the host, two screens tall (--h: 2); three steps,
+       a title, two lines and one terminal each; moment.js holds it while the steps open one at a time -->
+  <section class="section" id="how" style="--h: 2" data-moment="pinned-chapters" aria-labelledby="how-h">
+    <div class="wrap mo-pc__grid">
+      <div class="mo-pc__text">
+        <h2 id="how-h">From a host to a tunnel in three commands</h2>
+        <ol class="mo-pc__steps">
+          <li class="mo-pc__step">
+            <h3>Save each host once</h3>
+            <p>Add a host by hand or pull every entry from ~/.ssh/config. After that, shbx connect prod is the whole command.</p>
+            <figure class="mo-pc__visual mo-pc__visual--lit" role="img" aria-label="A terminal importing three hosts from the SSH config and adding a host called staging">
+              <div class="ui ui-panel ui-term term-dark term-wrap" aria-hidden="true">
+                <div class="ui-term__head"><span class="ui-dots"><i></i><i></i><i></i></span><span class="ui-term__title">~</span><span class="ui-meta">zsh</span></div>
+                <div class="ui-term__screen"><div class="ui-term__track">
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx import ssh-config</span></div>
+                  <div class="ui-term__ln"><span>Imported 3 host(s)</span></div>
+                  <div class="ui-term__ln"></div>
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx add staging <span class="t-arg">--host</span> 198.51.100.5 <span class="t-arg">--port</span> 2222</span></div>
+                  <div class="ui-term__ln"><span>Added host "staging"</span></div>
+                  <div class="ui-term__ln"></div>
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx connect prod <span class="t-arg">--dry-run</span></span></div>
+                  <div class="ui-term__ln"><span>ssh -p 22 -i ~/.ssh/id_ed25519 -- deploy@192.0.2.10</span></div>
+                  <div class="ui-term__ln"></div>
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx connect prod</span></div>
+                  <div class="ui-term__ln"><span class="ui-term__dim">Connecting to "prod" (deploy@192.0.2.10:22)...</span></div>
+                </div></div>
+              </div>
+            </figure>
+          </li>
+          <li class="mo-pc__step">
+            <h3>Start a tunnel by its name</h3>
+            <p>Local, remote and SOCKS forwards run in the background through a saved host. shbx tunnel stop db ends one.</p>
+            <figure class="mo-pc__visual mo-pc__visual--lit" role="img" aria-label="A terminal adding a tunnel called db to port 5432 on prod and starting it in the background">
+              <div class="ui ui-panel ui-term term-dark term-wrap" aria-hidden="true">
+                <div class="ui-term__head"><span class="ui-dots"><i></i><i></i><i></i></span><span class="ui-term__title">~</span><span class="ui-meta">zsh</span></div>
+                <div class="ui-term__screen"><div class="ui-term__track">
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx tunnel add db <span class="t-arg">--host</span> prod <span class="t-arg">--local-port</span> 5432</span></div>
+                  <div class="ui-term__ln"><span class="t-hi">    <span class="t-arg">--remote-host</span> 127.0.0.1 <span class="t-arg">--remote-port</span> 5432</span></div>
+                  <div class="ui-term__ln"><span>Added tunnel "db"</span></div>
+                  <div class="ui-term__ln"></div>
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx tunnel start db</span></div>
+                  <div class="ui-term__ln"><span>Starting tunnel "db"...</span></div>
+                  <div class="ui-term__ln"><span>Started tunnel "db" in background with pid 48213</span></div>
+                  <div class="ui-term__ln"></div>
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx tunnel list</span></div>
+                  <div class="ui-term__ln"><span class="ui-term__dim">NAME   STATUS   TYPE    SSH HOST   FORWARD</span></div>
+                  <div class="ui-term__ln"><span>db     <span class="t-ok">running</span>  local   prod       localhost:5432 -&gt; 127.0.0.1:5432</span></div>
+                </div></div>
+              </div>
+            </figure>
+          </li>
+          <li class="mo-pc__step">
+            <h3>Move files through the same host</h3>
+            <p>List, get and put files without typing the user, port or key again. shbx sftp prod opens a full session.</p>
+            <figure class="mo-pc__visual mo-pc__visual--lit" role="img" aria-label="A terminal downloading a log file from prod and uploading a build archive to it">
+              <div class="ui ui-panel ui-term term-dark term-wrap" aria-hidden="true">
+                <div class="ui-term__head"><span class="ui-dots"><i></i><i></i><i></i></span><span class="ui-term__title">~/app</span><span class="ui-meta">zsh</span></div>
+                <div class="ui-term__screen"><div class="ui-term__track">
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx sftp ls prod /var/www</span></div>
+                  <div class="ui-term__ln"><span>current    releases    shared</span></div>
+                  <div class="ui-term__ln"></div>
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx sftp get prod /var/log/app.log ./app.log</span></div>
+                  <div class="ui-term__ln"><span>Fetching /var/log/app.log to ./app.log</span></div>
+                  <div class="ui-term__ln"></div>
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx sftp put prod ./build.tar.gz /tmp/build.tar.gz</span></div>
+                  <div class="ui-term__ln"><span>Uploading ./build.tar.gz to /tmp/build.tar.gz</span></div>
+                  <div class="ui-term__ln"></div>
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx sftp prod</span></div>
+                  <div class="ui-term__ln"><span class="ui-term__dim">Opening SFTP to "prod" (deploy@192.0.2.10:22)...</span></div>
+                </div></div>
+              </div>
+            </figure>
+          </li>
+        </ol>
+      </div>
+      <div class="mo-pc__visuals frame"></div>
+    </div>
+  </section>
+
+  <section class="section" id="features" style="--hm: 2" aria-labelledby="features-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="features-h">Small commands around your hosts. <span class="muted">Checks, previews and completion.</span></h2>
+      </div>
+      <div class="grid">
+        <article class="card card--row card--open span-4 m-nolift">
+          <h3>Checks hosts, keys and tunnels</h3>
+          <p>shbx doctor reads the config, the ssh binary, keys and tunnels. With --fix it clears stale tunnel state.</p>
+          <div class="panel" role="img" aria-label="The output of shbx doctor: six checks passed and the result ok">
+            <div class="stage"><div class="at-rise fit">
+              <div class="ui ui-panel ui-term term-dark" data-ui="terminal-run" aria-hidden="true">
+                <div class="ui-term__head"><span class="ui-dots"><i></i><i></i><i></i></span><span class="ui-term__title">~</span><span class="ui-meta">zsh</span></div>
+                <div class="ui-term__screen" data-term-screen>
+                  <div class="ui-term__track" data-term-track>
+                    <div class="ui-term__ln ui-term__cmd"><span class="ui-term__sig">$</span><span class="ui-term__typed" data-term-cmd>shbx doctor</span></div>
+                    <div class="ui-term__ln ui-term__log" data-term-out data-term-step><svg class="ui-term__tick" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg><span class="ui-term__path">config permissions: 0600</span></div>
+                    <div class="ui-term__ln ui-term__log" data-term-out data-term-step><svg class="ui-term__tick" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg><span class="ui-term__path">ssh binary: /usr/bin/ssh</span></div>
+                    <div class="ui-term__ln ui-term__log" data-term-out data-term-step><svg class="ui-term__tick" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg><span class="ui-term__path">saved hosts: 3</span></div>
+                    <div class="ui-term__ln ui-term__log" data-term-out data-term-step><svg class="ui-term__tick" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg><span class="ui-term__path">saved tunnels: 3</span></div>
+                    <div class="ui-term__ln ui-term__log" data-term-out data-term-step><svg class="ui-term__tick" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg><span class="ui-term__path">running tunnels: 1</span></div>
+                    <div class="ui-term__ln ui-term__gap" data-term-out aria-hidden="true"></div>
+                    <div class="ui-term__ln ui-term__done" data-term-out data-term-done><span class="ui-term__ok"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.3 2.4 2.4 4.6-5"/></svg></span><b>Result: ok</b></div>
+                    <div class="ui-term__ln ui-term__cmd" data-term-next><span class="ui-term__sig">$</span><span class="ui-term__typed"></span><i class="ui-term__caret" aria-hidden="true"></i></div>
+                  </div>
+                </div>
+              </div>
+            </div></div>
+          </div>
+        </article>
+        <article class="card card--row card--open span-4 m-nolift">
+          <h3>Prints the SSH command first</h3>
+          <p>Add --dry-run to connect, sftp or tunnel start and shbx prints the exact ssh line instead of running it.</p>
+          <div class="panel" role="img" aria-label="Two dry runs: the ssh command for prod and the ssh command behind the tunnel db">
+            <div class="stage"><div class="at-rise fit">
+              <div class="ui ui-panel ui-term term-dark term-wrap" aria-hidden="true">
+                <div class="ui-term__head"><span class="ui-dots"><i></i><i></i><i></i></span><span class="ui-term__title">~</span><span class="ui-meta">zsh</span></div>
+                <div class="ui-term__screen"><div class="ui-term__track">
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx connect prod <span class="t-arg">--dry-run</span></span></div>
+                  <div class="ui-term__ln"><span>ssh -p 22 -i ~/.ssh/id_ed25519</span></div>
+                  <div class="ui-term__ln"><span>  -- deploy@192.0.2.10</span></div>
+                  <div class="ui-term__ln"></div>
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx tunnel start db <span class="t-arg">--dry-run</span></span></div>
+                  <div class="ui-term__ln"><span>ssh -p 22 -i ~/.ssh/id_ed25519</span></div>
+                  <div class="ui-term__ln"><span>  -o ExitOnForwardFailure=yes</span></div>
+                  <div class="ui-term__ln"><span>  -M -f -N -T -L 5432:127.0.0.1:5432</span></div>
+                  <div class="ui-term__ln"><span>  -- deploy@192.0.2.10</span></div>
+                </div></div>
+              </div>
+            </div></div>
+          </div>
+        </article>
+        <article class="card card--row card--open span-4 m-nolift">
+          <h3>Completes host and tunnel names</h3>
+          <p>One command installs completion for bash, zsh and fish, so Tab fills in every saved host and tunnel.</p>
+          <div class="panel" role="img" aria-label="Shell completion offering the saved hosts jump, prod and staging after shbx connect">
+            <div class="stage"><div class="at-rise fit">
+              <div class="ui ui-panel ui-term term-dark term-wrap" aria-hidden="true">
+                <div class="ui-term__head"><span class="ui-dots"><i></i><i></i><i></i></span><span class="ui-term__title">~</span><span class="ui-meta">zsh</span></div>
+                <div class="ui-term__screen"><div class="ui-term__track">
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx completion install <span class="t-arg">--shell</span> all</span></div>
+                  <div class="ui-term__ln"><span class="ui-term__dim">Installed zsh completion: ~/.local/share/shbx/completions/zsh/_shbx</span></div>
+                  <div class="ui-term__ln"></div>
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx connect </span><span class="ui-term__dim">tab</span></div>
+                  <div class="ui-term__ln"><span>jump    <span class="t-acc">prod</span>    staging</span></div>
+                  <div class="ui-term__ln"></div>
+                  <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx tunnel start </span><span class="ui-term__dim">tab</span></div>
+                  <div class="ui-term__ln"><span>db    grafana    socks</span></div>
+                </div></div>
+              </div>
+            </div></div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="faq" style="--hm: 2" aria-labelledby="faq-h">
+    <div class="wrap">
+      <div class="grid grid--top">
+        <div class="span-6 section-head">
+          <h2 id="faq-h">Questions</h2>
+          <p>Something missing here? <a class="link" href="https://github.com/itaprac/sshuttlebox/issues">Open an issue</a></p>
+          <div class="frame frame--lit faq__frame" role="img" aria-label="shbx config status showing the config file, three hosts, three tunnels, one group and one running tunnel">
+            <div class="ui ui-panel ui-term term-dark term-wrap" aria-hidden="true">
+              <div class="ui-term__head"><span class="ui-dots"><i></i><i></i><i></i></span><span class="ui-term__title">~</span><span class="ui-meta">zsh</span></div>
+              <div class="ui-term__screen"><div class="ui-term__track">
+                <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx config status</span></div>
+                <div class="ui-term__ln"><span>Config: ~/.config/sshuttlebox/config.json (present)</span></div>
+                <div class="ui-term__ln"><span>Hosts: 3  Tunnels: 3  Groups: 1  Running: 1</span></div>
+                <div class="ui-term__ln"></div>
+                <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx export ssh-config</span></div>
+                <div class="ui-term__ln"><span>Host prod</span></div>
+                <div class="ui-term__ln"><span>  HostName 192.0.2.10</span></div>
+                <div class="ui-term__ln"><span>  User deploy</span></div>
+              </div></div>
+            </div>
+          </div>
+        </div>
+        <div class="faq span-6 start-7">
+          <div class="faq__item"><h3>Does sshuttlebox run on Windows?</h3><p>No. It runs on macOS and Linux and calls the ssh and sftp you already have.</p></div>
+          <div class="faq__item"><h3>Where are my hosts stored?</h3><p>In one JSON file at ~/.config/sshuttlebox/config.json. shbx config backup saves a copy of it.</p></div>
+          <div class="faq__item"><h3>Can I keep my ~/.ssh/config?</h3><p>Yes. shbx import ssh-config reads its hosts; shbx export ssh-config writes them back.</p></div>
+          <div class="faq__item"><h3>Should I save SSH passwords in it?</h3><p>Better not: they sit in the local config file. Use keys; shbx doctor flags hosts that still have one.</p></div>
+          <div class="faq__item"><h3>What does sshuttlebox cost?</h3><p>Nothing. sshuttlebox is open source under the MIT licence.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="section ground-surface" id="install" style="--hm: 2" aria-labelledby="install-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="install-h">Install sshuttlebox with Go</h2>
+        <p>You need Go 1.22 or newer on macOS or Linux.</p>
+      </div>
+      <div class="grid grid--top">
+        <div class="span-6">
+          <p class="install__lead">One command builds the shbx binary into ~/go/bin.</p>
+          <div class="install">
+            <code id="install-cmd">go install github.com/itaprac/sshuttlebox/cmd/shbx@latest</code>
+            <button class="btn btn--secondary" type="button" data-copy="#install-cmd" aria-label="Copy the install command">Copy</button>
+          </div>
+          <ul class="rows install__rows">
+            <li><span class="rows__name">Put Go's bin folder on your PATH</span><span class="rows__value"><code>export PATH="$HOME/go/bin:$PATH"</code></span></li>
+            <li><span class="rows__name">Or build it from the source</span><span class="rows__value"><code>go build -o shbx ./cmd/shbx</code></span></li>
+            <li><span class="rows__name">Then open the terminal UI</span><span class="rows__value"><code>shbx</code></span></li>
+          </ul>
+        </div>
+        <div class="span-6 start-7 frame frame--lit" role="img" aria-label="A first run: installing shbx, creating the config, adding the host prod and connecting to it">
+          <div class="ui ui-panel ui-term term-dark term-wrap" aria-hidden="true">
+            <div class="ui-term__head"><span class="ui-dots"><i></i><i></i><i></i></span><span class="ui-term__title">~</span><span class="ui-meta">zsh</span></div>
+            <div class="ui-term__screen"><div class="ui-term__track">
+              <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">go install github.com/itaprac/sshuttlebox/cmd/shbx@latest</span></div>
+              <div class="ui-term__ln"></div>
+              <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx config init</span></div>
+              <div class="ui-term__ln"><span>Created config: ~/.config/sshuttlebox/config.json</span></div>
+              <div class="ui-term__ln"></div>
+              <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx add prod <span class="t-arg">--host</span> 192.0.2.10 <span class="t-arg">--user</span> deploy</span></div>
+              <div class="ui-term__ln"><span>Added host "prod"</span></div>
+              <div class="ui-term__ln"></div>
+              <div class="ui-term__ln"><span class="ui-term__sig">$</span><span class="t-hi">shbx connect prod</span></div>
+              <div class="ui-term__ln"><span class="ui-term__dim">Connecting to "prod" (deploy@192.0.2.10:22)...</span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer closing footer--dark ground-inverse g2m" id="contact" aria-labelledby="close-h">
+  <div class="wrap">
+    <div class="closing__cta close--word">
+      <div class="section-head--split">
+        <div><h2 id="close-h">Free and open source under MIT</h2><p class="t-lead">Needs Go 1.22 or newer on macOS or Linux.</p></div>
+        <a class="btn btn--primary" href="#install">Get shbx<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+      </div>
+      <p class="close__word" aria-hidden="true">sshuttlebox</p>
+    </div>
+    <div class="closing__links">
+      <div class="grid">
+        <div class="span-4 stack-4">
+          <p class="footer__lede">SSH hosts, tunnels and files from one terminal command.</p>
+        </div>
+        <div class="span-2 start-5 footer__col"><h3>Workflow</h3><ul><li><a href="#how">Hosts and tunnels</a></li><li><a href="#features">Features</a></li></ul></div>
+        <div class="span-2 footer__col"><h3>Install</h3><ul><li><a href="#install">Install steps</a></li><li><a href="#faq">Questions</a></li></ul></div>
+        <div class="span-2 footer__col"><h3>Source</h3><ul><li><a href="https://github.com/itaprac/sshuttlebox">GitHub</a></li><li><a href="https://github.com/itaprac/sshuttlebox/issues">Issues</a></li></ul></div>
+        <div class="span-2 footer__col"><h3>Licence</h3><ul><li><a href="https://github.com/itaprac/sshuttlebox/blob/main/LICENSE">MIT licence</a></li></ul></div>
+      </div>
+      <div class="footer__legal">
+        <span>&copy; 2026 sshuttlebox</span>
+        <div class="socials"></div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<nav class="actionbar" aria-label="Quick actions">
+  <a class="btn btn--primary" href="#install">Get shbx</a>
+</nav>
+
+<script>
+  // the install command's copy control: copies the command and says so on the button for two seconds
+  document.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const text = document.querySelector(btn.dataset.copy)?.textContent.trim();
+      if (!text) return;
+      try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied'; }
+      catch { btn.textContent = 'Select and copy'; }
+      setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+    });
+  });
+</script>
+<script type="module" src="assets/system.js"></script>
+<script type="module" src="assets/motion/motion.js"></script>
+<script type="module" src="assets/layout/layout.js"></script>
+</body>
 </html>
